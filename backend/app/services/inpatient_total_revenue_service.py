@@ -42,35 +42,28 @@ def get_departments():
     return repo.get_departments()
 
 
-def get_revenue_details(start, end=None, departments=None, limit=20, offset=0):
+def get_revenue_details(start, end=None, departments=None):
     """
-    明细：
-    - Repository 只查原始值（当前/去年/上一期收入 + 床日）
-    - 这里负责算收入同比/环比、趋势等，再返回给路由/前端
+    前端分页版：后端返回当前筛选下“全部明细行”
     """
-    raw = repo.get_revenue_details(start, end, departments, limit=limit, offset=offset)
+    raw = repo.get_revenue_details(start, end, departments)
 
     rows_out = []
     for r in raw["rows"]:
-        # 原始值（仓储层已经把 Decimal/date 转成基本类型了）
         curr = Decimal(str(r.get("revenue_raw") or "0"))
         ly = Decimal(str(r.get("ly_revenue_raw") or "0"))
         prev = Decimal(str(r.get("prev_revenue_raw") or "0"))
         bed_curr = Decimal(str(r.get("bed_value") or "0"))
         bed_ly = Decimal(str(r.get("bed_last_year") or "0"))
 
-        # 收入同比 / 环比（返回的是小数，例如 0.1234 表示 12.34%）
         rev_growth = safe_pct_change(curr, ly)
         rev_mom = safe_pct_change(curr, prev)
-
-        # 床日同比，用于趋势判断
         bed_growth = safe_pct_change(bed_curr, bed_ly)
 
-        # 趋势判断，沿用之前的逻辑
         trend = "持平/未知"
         try:
-            rev_g = rev_growth if rev_growth is not None else DEC_0
-            bed_g = bed_growth if bed_growth is not None else DEC_0
+            rev_g = rev_growth or DEC_0
+            bed_g = bed_growth or DEC_0
             if rev_g > DEC_POS_EPS and bed_g > DEC_POS_EPS:
                 trend = "同向"
             elif rev_g < DEC_NEG_EPS and bed_g < DEC_NEG_EPS:
@@ -78,24 +71,20 @@ def get_revenue_details(start, end=None, departments=None, limit=20, offset=0):
             elif (rev_g > DEC_POS_EPS and bed_g < DEC_NEG_EPS) or (rev_g < DEC_NEG_EPS and bed_g > DEC_POS_EPS):
                 trend = "反向"
         except Exception:
-            logger.exception("Error computing trend in get_revenue_details")
+            logger.exception("Error computing trend")
 
         rows_out.append({
-            "date": r.get("date"),
-            "department_code": r.get("department_code"),
-            "department_name": r.get("department_name"),
-            # 收入本身保留两位小数
+            "date": r["date"],
+            "department_code": r["department_code"],
+            "department_name": r["department_name"],
             "revenue": float(curr.quantize(Decimal("0.01"))),
-            # 百分比：返回 12.34 表示 12.34%
-            "revenue_growth_pct": float(rev_growth * DEC_100) if rev_growth is not None else None,
-            "revenue_mom_growth_pct": float(rev_mom * DEC_100) if rev_mom is not None else None,
+            "revenue_growth_pct": float(rev_growth * DEC_100) if rev_growth else None,
+            "revenue_mom_growth_pct": float(rev_mom * DEC_100) if rev_mom else None,
             "trend": trend,
         })
 
-    return {
-        "rows": rows_out,
-        "total": raw.get("total", 0),
-    }
+    return {"rows": rows_out, "total": len(rows_out)}
+
 
 
 
@@ -164,7 +153,7 @@ def get_revenue_summary(start_date, end_date, departments=None):
         bed_ly = repo.get_total_bed(ly_start, ly_end, deps)
         bed_prev = repo.get_total_bed(prev_start, prev_end, deps)
 
-        # 收入同比 / 环比
+        # 收入同比 / 环比（这里仍然用“元”的原始值来算，结果不受单位影响）
         rev_growth_pct = safe_pct_change(total_curr, total_ly)  # Decimal or None
         mom_growth_pct = safe_pct_change(total_curr, total_prev)
 
@@ -186,6 +175,16 @@ def get_revenue_summary(start_date, end_date, departments=None):
         except Exception:
             logger.exception("Error computing trend in get_revenue_summary")
 
+        # —— 这里开始做“元 → 万元”的单位转换，只影响展示 —— #
+        def _to_10k(v: Decimal | None) -> Decimal:
+            if v is None:
+                return DEC_0
+            return (v / Decimal("10000")).quantize(Decimal("0.01"))
+
+        total_curr_10k = _to_10k(total_curr)
+        total_ly_10k = _to_10k(total_ly)
+        total_prev_10k = _to_10k(total_prev)
+
         # 为前端准备 float %
         rev_growth_pct_f = (float(rev_growth_pct * DEC_100) if rev_growth_pct is not None else None)
         mom_growth_pct_f = (float(mom_growth_pct * DEC_100) if mom_growth_pct is not None else None)
@@ -204,11 +203,13 @@ def get_revenue_summary(start_date, end_date, departments=None):
                 "previous_period_same_length": {"start": prev_start.isoformat(), "end": prev_end.isoformat()},
             },
             "revenue": {
-                "current_total": float(total_curr or 0),
-                "last_year_total": float(total_ly or 0),
-                "previous_total": float(total_prev or 0),
+                # ✅ 这里三项已经是“万元”，保留两位小数
+                "current_total": float(total_curr_10k),
+                "last_year_total": float(total_ly_10k),
+                "previous_total": float(total_prev_10k),
                 "growth_rate_pct": rev_growth_pct_f,
                 "mom_growth_pct": mom_growth_pct_f,
+                "unit": "万元",
             },
             "bed": {
                 "growth_rate_pct": bed_growth_pct_f,
@@ -218,6 +219,7 @@ def get_revenue_summary(start_date, end_date, departments=None):
             "bed_mom_growth_pct": bed_mom_growth_pct_f,
             "trend": trend,
             "notes": [
+                "收入单位：万元。",
                 "同比 = 与去年同期同区间；环比 = 与同长度上一周期。",
                 "床位数：实时(t_workload_inbed_reg_f) + 历史(t_dep_count_inbed<今天) 联合，仅用于趋势判断"
             ]

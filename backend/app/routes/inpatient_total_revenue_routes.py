@@ -153,76 +153,45 @@ def summary():
 @bp.route("/details", methods=["POST", "GET"])
 def details():
     """
-    明细汇总（按 日期 × 科室 聚合；收入 = charges；忽略 amount）
-    返回字段包含：revenue_mom_growth_pct（环比%）
+    明细接口：后端不分页，返回全部行，前端自行分页
     """
     try:
         payload = request.get_json(silent=True) or {}
         start_date = payload.get("start_date") or request.args.get("start_date")
         end_date = payload.get("end_date") or request.args.get("end_date")
 
-        # ---------- 参数解析 ----------
-        def _parse_list(v):
-            if v is None:
-                return None
-            if isinstance(v, (list, tuple, set)):
-                return [str(x).strip() for x in v if str(x).strip()]
-            return [s.strip() for s in str(v).split(",") if s.strip()]
+        departments = _parse_departments(payload)
 
-        departments = _parse_list(payload.get("departments") or request.args.get("departments"))
+        if not start_date:
+            return jsonify({
+                "success": False,
+                "error": "缺少 start_date"
+            }), 400
 
-        def _to_int(x, default):
-            try:
-                return int(x)
-            except Exception:
-                return default
-
-        limit = _to_int(payload.get("limit") or request.args.get("limit"), 20)
-        offset = _to_int(payload.get("offset") or request.args.get("offset"), 0)
-        if limit <= 0: limit = 20
-        if offset < 0: offset = 0
-
-        ok, missing = require_params({"start_date": start_date}, ["start_date"])
-        if not ok:
-            return jsonify(
-                {"success": False, "code": "BAD_REQUEST", "error": f"缺少必填参数: {', '.join(missing)}"}), 400
-
-        # ---------- 日期解析 ----------
         sd = parse_date_generic(start_date)
         ed = parse_date_generic(end_date) if end_date else None
         if not sd:
-            return jsonify({"success": False, "code": "BAD_REQUEST", "error": "日期格式错误"}), 400
+            return jsonify({"success": False, "error": "日期格式错误"}), 400
 
         single_day = False
         if not ed or ed == sd:
-
-            # 单日：区间 [sd, sd+1)
             ed = sd + timedelta(days=1)
             single_day = True
         elif ed < sd:
-            return jsonify({
-                "success": False,
-                "code": "BAD_REQUEST",
-                "error": "结束日期必须大于开始日期"
-            }), 400
+            return jsonify({"success": False, "error": "结束日期必须大于开始日期"}), 400
         else:
-            # 多日：用户选 [sd, ed]，转换到 [sd, ed+1)
             ed = ed + timedelta(days=1)
 
-        # ---------- 调用服务 ----------
-        result = get_revenue_details(sd, ed, departments, limit=limit, offset=offset)
-        rows, total = result["rows"], int(result["total"])
+        # ⭐ 调用不分页版 service
+        result = get_revenue_details(sd, ed, departments)
+        rows, total = result["rows"], result["total"]
 
-        # ---------- 构造响应 ----------
         body = {
             "success": True,
             "departments": departments,
             "rows": rows,
             "total": total,
-            "limit": limit,
-            "offset": offset,
         }
-
         if single_day:
             body["date"] = sd.isoformat()
         else:
@@ -231,12 +200,8 @@ def details():
         return jsonify(body), 200
 
     except Exception as e:
-        logger.exception("Error while processing /details: %s", e)
-        return jsonify({
-            "success": False,
-            "code": "SERVER_ERROR",
-            "error": str(e)
-        }), 500
+        logger.exception("details error: %s", e)
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @bp.route("/timeseries", methods=["POST", "GET"])

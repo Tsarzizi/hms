@@ -20,73 +20,74 @@ export default function InpatientSummaryCards({
       <h2 className="text-lg font-semibold mb-3 text-left">汇总概览</h2>
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4 text-left text-sm">
         <div className="space-y-1">
-          <div className="text-gray-600">总收入</div>
+          <div className="text-gray-600">总收入（万元）</div>
           <div className="text-lg font-mono">
             {summary?.total_revenue?.toLocaleString?.() ?? "-"}
           </div>
         </div>
+
         <div className="space-y-1">
-          <div className="text-gray-600">收入同比增长 (YoY)</div>
+          <div className="text-gray-600">收入同比增长</div>
           <div
-            className={
-              typeof summary?.yoy_growth_rate === "number"
-                ? summary.yoy_growth_rate >= 0
-                  ? "text-green-600"
-                  : "text-red-600"
-                : ""
-            }
+              className={
+                typeof summary?.yoy_growth_rate === "number"
+                    ? summary.yoy_growth_rate >= 0
+                        ? "text-green-600"
+                        : "text-red-600"
+                    : ""
+              }
           >
             {typeof summary?.yoy_growth_rate === "number"
-              ? `${summary.yoy_growth_rate.toFixed(2)}%`
-              : "-"}
+                ? `${summary.yoy_growth_rate.toFixed(2)}%`
+                : "-"}
           </div>
         </div>
         <div className="space-y-1">
-          <div className="text-gray-600">收入环比增长 (MoM)</div>
+          <div className="text-gray-600">收入环比增长</div>
           <div
-            className={
-              typeof summary?.mom_growth_rate === "number"
-                ? summary.mom_growth_rate >= 0
-                  ? "text-green-600"
-                  : "text-red-600"
-                : ""
-            }
+              className={
+                typeof summary?.mom_growth_rate === "number"
+                    ? summary.mom_growth_rate >= 0
+                        ? "text-green-600"
+                        : "text-red-600"
+                    : ""
+              }
           >
             {typeof summary?.mom_growth_rate === "number"
-              ? `${summary.mom_growth_rate.toFixed(2)}%`
-              : "-"}
+                ? `${summary.mom_growth_rate.toFixed(2)}%`
+                : "-"}
           </div>
         </div>
         <div className="space-y-1">
           <div className="text-gray-600">床日同比增长</div>
           <div
-            className={
-              typeof summary?.bed_day_growth_rate === "number"
-                ? summary.bed_day_growth_rate >= 0
-                  ? "text-green-600"
-                  : "text-red-600"
-                : ""
-            }
+              className={
+                typeof summary?.bed_day_growth_rate === "number"
+                    ? summary.bed_day_growth_rate >= 0
+                        ? "text-green-600"
+                        : "text-red-600"
+                    : ""
+              }
           >
             {typeof summary?.bed_day_growth_rate === "number"
-              ? `${summary.bed_day_growth_rate.toFixed(2)}%`
-              : "-"}
+                ? `${summary.bed_day_growth_rate.toFixed(2)}%`
+                : "-"}
           </div>
         </div>
         <div className="space-y-1">
           <div className="text-gray-600">床日环比增长</div>
           <div
-            className={
-              typeof summary?.bed_day_mom_growth_rate === "number"
-                ? summary.bed_day_mom_growth_rate >= 0
-                  ? "text-green-600"
-                  : "text-red-600"
-                : ""
-            }
+              className={
+                typeof summary?.bed_day_mom_growth_rate === "number"
+                    ? summary.bed_day_mom_growth_rate >= 0
+                        ? "text-green-600"
+                        : "text-red-600"
+                    : ""
+              }
           >
             {typeof summary?.bed_day_mom_growth_rate === "number"
-              ? `${summary.bed_day_mom_growth_rate.toFixed(2)}%`
-              : "-"}
+                ? `${summary.bed_day_mom_growth_rate.toFixed(2)}%`
+                : "-"}
           </div>
         </div>
       </div>

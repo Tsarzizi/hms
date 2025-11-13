@@ -1,6 +1,12 @@
 // src/services/inpatientTotalRevenueApi.ts
-import type { RequestInit } from "react";
-
+// ------------------------------------------------------
+// 住院收入分析 API 服务层（前端分页版）
+// 修改内容：
+//   1. fetchDetailsAPI 不再传 limit / offset
+//   2. DetailsResponse 不再包含 limit/offset
+//   3. 后端 /details 只需返回 rows + total
+//   4. 其他接口保持不变
+// ------------------------------------------------------
 export type Trend = "同向" | "反向" | "持平/未知" | string;
 
 export interface DepartmentOption {
@@ -47,19 +53,14 @@ export interface SummaryResponse {
   date_range?: { start: string; end: string };
   departments?: string[] | null;
   summary: RevenueSummaryStd;
-  // 后端可能还带 revenue / bed 等字段，这里不做强约束
   [k: string]: any;
 }
 
+// ⭐ 修改：去掉 limit / offset（后端不再分页）
 export interface DetailsResponse {
   success: boolean;
-  date?: string;
-  date_range?: { start: string; end: string };
-  departments?: string[] | null;
   rows: DetailsRow[];
   total: number;
-  limit: number;
-  offset: number;
 }
 
 export interface TSRow {
@@ -88,7 +89,6 @@ export type SortKey =
   | "revenue_yoy"
   | "revenue_mom";
 
-// 支持环境变量覆盖：VITE_API_BASE
 export const API_BASE =
   typeof import.meta !== "undefined" &&
   (import.meta as any).env &&
@@ -117,6 +117,7 @@ export function getPrevRange(startStr: string, endStr?: string) {
   return { prevStart: fmt(prevStart), prevEnd: fmt(prevEndExclusive) };
 }
 
+// --- 基础封装 ---
 export async function apiFetch(
   url: string,
   options: RequestInit = {},
@@ -140,12 +141,14 @@ export async function apiFetch(
   }
 }
 
+// 初始化（科室 + 汇总 + 今日日期）
 export async function fetchInitAPI(): Promise<InitResponse> {
   const res = await apiFetch(`${API_BASE}/init`);
   if (!res.ok) throw new Error(`INIT 请求失败：${res.status}`);
   return res.json();
 }
 
+// 汇总（summary）
 export async function fetchSummaryAPI(params: {
   start: string;
   end: string;
@@ -167,19 +170,17 @@ export async function fetchSummaryAPI(params: {
   return res.json();
 }
 
+// ⭐ 关键修改：后端不分页 → 删除 limit / offset 参数
 export async function fetchDetailsAPI(params: {
   start: string;
   end: string;
   deps?: string[] | null;
-  limit: number;
-  offset: number;
 }): Promise<DetailsResponse> {
-  const { start, end, deps, limit, offset } = params;
+  const { start, end, deps } = params;
+
   const payload: Record<string, any> = {
     start_date: start,
     end_date: end,
-    limit,
-    offset,
   };
   if (deps && deps.length) payload.departments = deps;
 
@@ -192,6 +193,7 @@ export async function fetchDetailsAPI(params: {
   return res.json();
 }
 
+// 趋势数据
 export async function fetchTimeseriesAPI(params: {
   start: string;
   end: string;
@@ -210,6 +212,7 @@ export async function fetchTimeseriesAPI(params: {
   return res.json();
 }
 
+// --- 汇总模型转换 ---
 export interface SummaryViewModel {
   total_revenue?: number;
   yoy_growth_rate?: number;
@@ -267,6 +270,7 @@ export function extractSummaryFromStd(payload: any): SummaryViewModel | null {
   return Object.keys(out).length ? out : null;
 }
 
+// 缺少环比时自动补一次上一周期 summary
 export async function maybeEnsureMoM(params: {
   currentSummary: SummaryViewModel | null;
   start: string;
@@ -319,6 +323,7 @@ export function formatDate(dateStr?: string | null) {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
+// 从明细中推导出医生列表（用于前端筛选）
 export function deriveDoctors(rows: any[]): DoctorOption[] {
   const map = new Map<string, string>();
   for (const r of rows || []) {

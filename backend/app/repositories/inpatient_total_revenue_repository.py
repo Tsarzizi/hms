@@ -161,21 +161,13 @@ class InpatientTotalRevenueRepository:
         return self._query_scalar(sql, params)
 
     def get_revenue_details(
-        self,
-        start: date,
-        end: Optional[date] = None,
-        departments=None,
-        limit: int = 20,
-        offset: int = 0,
+            self,
+            start: date,
+            end: Optional[date] = None,
+            departments=None,
     ) -> Dict[str, Any]:
         """
-        明细查询（日期+科室聚合），仓储层只负责查原始值：
-        - 当前收入 revenue_raw
-        - 去年同期收入 ly_revenue_raw
-        - 上一周期收入 prev_revenue_raw
-        - 当前床日 bed_value
-        - 去年同期床日 bed_last_year
-        具体的同比/环比/趋势由应用层计算。
+        后端不分页版：返回当前筛选下的“全部明细行”
         """
         if end is None:
             end = start + timedelta(days=1)
@@ -185,10 +177,9 @@ class InpatientTotalRevenueRepository:
             "start": start,
             "end": end,
             "deps": deps,
-            "limit": int(limit),
-            "offset": int(offset),
         }
 
+        # ⭐ 已删除 total_count + LIMIT OFFSET
         sql = """
         WITH base AS (
           SELECT
@@ -256,11 +247,7 @@ class InpatientTotalRevenueRepository:
             AND b.inbed_date < CURRENT_DATE
             AND (%(deps)s IS NULL OR b.dep_code = ANY(%(deps)s))
         ),
-        cur_bed AS (
-          SELECT dt, dep_code, SUM(bed_cnt) AS bed_cnt
-          FROM cur_bed_raw
-          GROUP BY 1,2
-        ),
+        cur_bed AS (SELECT dt, dep_code, SUM(bed_cnt) AS bed_cnt FROM cur_bed_raw GROUP BY 1,2),
         ly_bed_raw AS (
           SELECT
             (r.adm_date::date + INTERVAL '1 year') AS dt,
@@ -303,19 +290,13 @@ class InpatientTotalRevenueRepository:
           LEFT JOIN cur_bed  cb ON cb.dt = c.dt AND cb.dep_code = c.dep_code
           LEFT JOIN ly_bed   lb ON lb.dt = c.dt AND lb.dep_code = c.dep_code
         )
-        SELECT
-          *,
-          COUNT(*) OVER() AS total_count
+        SELECT *
         FROM final
-        ORDER BY date DESC, department_code
-        LIMIT %(limit)s OFFSET %(offset)s;
+        ORDER BY date DESC, department_code;
         """
 
         rows = self._query_rows(sql, params)
-        total = int(rows[0]["total_count"]) if rows else 0
-        for r in rows:
-            r.pop("total_count", None)
-        return {"rows": rows, "total": total}
+        return {"rows": rows, "total": len(rows)}
 
     def get_revenue_timeseries(
             self,

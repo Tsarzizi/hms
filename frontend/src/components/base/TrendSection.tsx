@@ -1,6 +1,6 @@
 // src/components/inpatient/InpatientTrendSection.tsx
-import LineChart, { CompareKind } from "./LineChart";
-import type { TSRow } from "../services/inpatientTotalRevenueApi";
+import LineChart, { CompareKind } from "../LineChart";
+import type { TSRow } from "../../services/inpatientTotalRevenueApi";
 
 interface Props {
   rows: TSRow[];
