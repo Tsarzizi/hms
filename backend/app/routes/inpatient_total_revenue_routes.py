@@ -1,10 +1,12 @@
 import logging
 from datetime import date, timedelta
 from flask import Blueprint, jsonify, request
-
-from ..services.inpatient_total_revenue_service import get_revenue_summary, get_departments, get_revenue_details
+from ..services.inpatient_total_revenue_service import (get_revenue_summary,
+                                                        get_departments,
+                                                        get_revenue_details, \
+                                                        get_revenue_timeseries)
 from ..utils.inpatient_total_revenue_validators import require_params, parse_date_generic
-from ..utils.cache import cache_get, cache_set  # 保持缓存
+from ..utils.cache import cache_get, cache_set
 logger = logging.getLogger("inpatient_total_revenue.routes")
 bp = Blueprint("inpatient_total_revenue", __name__)
 
@@ -15,6 +17,9 @@ def _to_std_summary(service_result: dict) -> dict:
     """
     rev = (service_result or {}).get("revenue") or {}
     trend = (service_result or {}).get("trend")
+    bed_obj = (service_result or {}).get("bed") or {}
+    bed_top_yoy = (service_result or {}).get("bed_growth_pct")
+    bed_top_mom = (service_result or {}).get("bed_mom_growth_pct")
 
     def _to_num(x):
         try:
@@ -28,7 +33,9 @@ def _to_std_summary(service_result: dict) -> dict:
         "previous": float(rev.get("previous_total") or 0.0),
         "growth_rate": _to_num(rev.get("growth_rate_pct")),
         "mom_growth_rate": _to_num(rev.get("mom_growth_pct")),
-        "trend": trend,
+        "bed_growth_rate": _to_num(bed_top_yoy if bed_top_yoy is not None else bed_obj.get("growth_rate_pct")),
+        "bed_mom_growth_rate": _to_num(bed_top_mom if bed_top_mom is not None else bed_obj.get("mom_growth_pct")),
+        "trend": trend,  # 虽然前端不展示，但保留字段不影响
     }
 
 
@@ -50,12 +57,6 @@ def _parse_include() -> set:
 
 
 def _parse_departments(payload):
-    """
-    兼容：
-      - department=0301
-      - departments=0301,0402
-      - {"departments": ["0301","0402"]}
-    """
     dep_single = payload.get("department") or request.args.get("department")
     deps_field = payload.get("departments") or request.args.get("departments")
     out = []
@@ -74,9 +75,6 @@ def _parse_departments(payload):
 
 @bp.route("/init", methods=["GET", "POST"])
 def init():
-    """
-    初始化：返回今日日期、科室列表、今日全院汇总（YoY/MoM/趋势）
-    """
     try:
         include = _parse_include()
         today = date.today()
@@ -90,11 +88,11 @@ def init():
             deps = cache_get(cache_key)
             if deps is None:
                 deps = get_departments()
-                cache_set(cache_key, deps, ttl_seconds=1800)  # 30 min
+                cache_set(cache_key, deps, ttl_seconds=1800)
             resp["departments"] = deps
 
         if "data" in include:
-            svc = get_revenue_summary(today, tomorrow, None)  # 全院
+            svc = get_revenue_summary(today, tomorrow, None)
             resp["summary"] = _to_std_summary(svc)
 
         return jsonify(resp), 200
@@ -105,14 +103,6 @@ def init():
 
 @bp.route("/summary", methods=["POST", "GET"])
 def summary():
-    """
-    汇总查询（基于筛选集合）：返回
-      - current（元）
-      - growth_rate（同比%）
-      - mom_growth_rate（环比%）
-      - trend（收入 vs 床日）
-    以及 last_year/previous 便于展示或校对。
-    """
     try:
         payload = request.get_json(silent=True) or {}
         start_date = payload.get("start_date") or request.args.get("start_date")
@@ -128,14 +118,20 @@ def summary():
         sd = parse_date_generic(start_date)
         ed = parse_date_generic(end_date) if end_date else None
         if not sd:
-            return jsonify({"success": False, "code": "BAD_REQUEST", "error": "日期格式错误（支持 YYYY-MM-DD / YYYY/MM/DD / YYYYMMDD）"}), 400
+            return jsonify({"success": False, "code": "BAD_REQUEST",
+                            "error": "日期格式错误（支持 YYYY-MM-DD / YYYY/MM/DD / YYYYMMDD）"}), 400
 
         single_day = False
         if not ed or ed == sd:
+            # 单日：用户只选开始日期或开始=结束 -> 区间为 [sd, sd+1)
             ed = sd + timedelta(days=1)
             single_day = True
-        elif ed <= sd:
+        elif ed < sd:
             return jsonify({"success": False, "code": "BAD_REQUEST", "error": "结束日期必须大于开始日期"}), 400
+        else:
+            # 多日：用户选的是自然日闭区间 [sd, ed]，转换成半开区间 [sd, ed+1)
+            ed = ed + timedelta(days=1)
+
 
         svc = get_revenue_summary(sd, ed, departments)
         body = {"success": True, "departments": departments}
@@ -157,34 +153,7 @@ def summary():
 def details():
     """
     明细汇总（按 日期 × 科室 聚合；收入 = charges；忽略 amount）
-    请求：
-      {
-        "start_date": "YYYY-MM-DD",
-        "end_date": "YYYY-MM-DD" (可选),
-        "departments": ["0301","0402"] 或 "0301,0402" (可选),
-        "limit": 20, "offset": 0  (可选)
-      }
-
-    响应：
-      {
-        "success": true,
-        "date" 或 "date_range": {...},
-        "departments": [...],
-        "limit": 20,
-        "offset": 0,
-        "total": 123,
-        "rows": [
-          {
-            "date": "2025-11-12",
-            "department_code": "0301",
-            "department_name": "心内科",
-            "revenue": 23456.78,
-            "revenue_growth_pct": 12.34,
-            "trend": "同向"
-          },
-          ...
-        ]
-      }
+    返回字段包含：revenue_mom_growth_pct（环比%）
     """
     try:
         payload = request.get_json(silent=True) or {}
@@ -193,7 +162,6 @@ def details():
 
         # ---------- 参数解析 ----------
         def _parse_list(v):
-            """支持列表或逗号分隔字符串"""
             if v is None:
                 return None
             if isinstance(v, (list, tuple, set)):
@@ -215,11 +183,7 @@ def details():
 
         ok, missing = require_params({"start_date": start_date}, ["start_date"])
         if not ok:
-            return jsonify({
-                "success": False,
-                "code": "BAD_REQUEST",
-                "error": f"缺少必填参数: {', '.join(missing)}"
-            }), 400
+            return jsonify({"success": False, "code": "BAD_REQUEST", "error": f"缺少必填参数: {', '.join(missing)}"}), 400
 
         # ---------- 日期解析 ----------
         sd = parse_date_generic(start_date)
@@ -229,15 +193,20 @@ def details():
 
         single_day = False
         if not ed or ed == sd:
-            from datetime import timedelta
+
+            # 单日：区间 [sd, sd+1)
             ed = sd + timedelta(days=1)
             single_day = True
-        elif ed <= sd:
+        elif ed < sd:
             return jsonify({
                 "success": False,
                 "code": "BAD_REQUEST",
                 "error": "结束日期必须大于开始日期"
             }), 400
+        else:
+            # 多日：用户选 [sd, ed]，转换到 [sd, ed+1)
+            ed = ed + timedelta(days=1)
+
 
         # ---------- 调用服务 ----------
         result = get_revenue_details(sd, ed, departments, limit=limit, offset=offset)
@@ -267,8 +236,49 @@ def details():
             "code": "SERVER_ERROR",
             "error": str(e)
         }), 500
+@bp.route("/timeseries", methods=["POST", "GET"])
+def timeseries():
+    """
+    趋势接口：返回 [start_date, end_date) 区间内的每日收入（charges），以及去年同日/前一日对比的增长率。
+    响应 rows: [{date, revenue, last_year, prev_day, yoy_pct, mom_pct}]
+    """
+    try:
+        payload = request.get_json(silent=True) or {}
+        start_date = payload.get("start_date") or request.args.get("start_date")
+        end_date   = payload.get("end_date")   or request.args.get("end_date")
+        departments = _parse_departments(payload)  # 兼容 department / departments 两种入参
 
+        ok, missing = require_params({"start_date": start_date}, ["start_date"])
+        if not ok:
+            return jsonify({"success": False, "code": "BAD_REQUEST", "error": f"缺少必填参数: {', '.join(missing)}"}), 400
 
+        sd = parse_date_generic(start_date)
+        ed = parse_date_generic(end_date) if end_date else None
+        if not sd:
+            return jsonify({"success": False, "code": "BAD_REQUEST", "error": "日期格式错误"}), 400
 
+        single_day = False
+        if not ed or ed == sd:
+            ed = sd + timedelta(days=1)
+            single_day = True
+        elif ed < sd:
+            return jsonify({"success": False, "code": "BAD_REQUEST", "error": "结束日期必须大于开始日期"}), 400
+        else:
+            ed = ed + timedelta(days=1)
 
+        rows = get_revenue_timeseries(sd, ed, departments)
 
+        body = {
+            "success": True,
+            "departments": departments,
+            "rows": rows,
+        }
+        if single_day:
+            body["date"] = sd.isoformat()
+        else:
+            body["date_range"] = {"start": sd.isoformat(), "end": ed.isoformat()}
+        return jsonify(body), 200
+
+    except Exception as e:
+        logger.exception("Error while processing /timeseries: %s", e)
+        return jsonify({"success": False, "code": "SERVER_ERROR", "error": str(e)}), 500
