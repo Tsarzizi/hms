@@ -7,6 +7,7 @@ from ..services.inpatient_total_revenue_service import (get_revenue_summary,
                                                         get_revenue_timeseries)
 from ..utils.inpatient_total_revenue_validators import require_params, parse_date_generic
 from ..utils.cache import cache_get, cache_set
+
 logger = logging.getLogger("inpatient_total_revenue.routes")
 bp = Blueprint("inpatient_total_revenue", __name__)
 
@@ -106,14 +107,15 @@ def summary():
     try:
         payload = request.get_json(silent=True) or {}
         start_date = payload.get("start_date") or request.args.get("start_date")
-        end_date   = payload.get("end_date")   or request.args.get("end_date")
+        end_date = payload.get("end_date") or request.args.get("end_date")
         departments = _parse_departments(payload)
 
         logger.info("SUMMARY: start=%s end=%s deps=%s", start_date, end_date, departments or "ALL")
 
         ok, missing = require_params({"start_date": start_date}, ["start_date"])
         if not ok:
-            return jsonify({"success": False, "code": "BAD_REQUEST", "error": f"缺少必填参数: {', '.join(missing)}"}), 400
+            return jsonify(
+                {"success": False, "code": "BAD_REQUEST", "error": f"缺少必填参数: {', '.join(missing)}"}), 400
 
         sd = parse_date_generic(start_date)
         ed = parse_date_generic(end_date) if end_date else None
@@ -131,7 +133,6 @@ def summary():
         else:
             # 多日：用户选的是自然日闭区间 [sd, ed]，转换成半开区间 [sd, ed+1)
             ed = ed + timedelta(days=1)
-
 
         svc = get_revenue_summary(sd, ed, departments)
         body = {"success": True, "departments": departments}
@@ -158,7 +159,7 @@ def details():
     try:
         payload = request.get_json(silent=True) or {}
         start_date = payload.get("start_date") or request.args.get("start_date")
-        end_date   = payload.get("end_date")   or request.args.get("end_date")
+        end_date = payload.get("end_date") or request.args.get("end_date")
 
         # ---------- 参数解析 ----------
         def _parse_list(v):
@@ -176,14 +177,15 @@ def details():
             except Exception:
                 return default
 
-        limit  = _to_int(payload.get("limit")  or request.args.get("limit"),  20)
+        limit = _to_int(payload.get("limit") or request.args.get("limit"), 20)
         offset = _to_int(payload.get("offset") or request.args.get("offset"), 0)
         if limit <= 0: limit = 20
         if offset < 0: offset = 0
 
         ok, missing = require_params({"start_date": start_date}, ["start_date"])
         if not ok:
-            return jsonify({"success": False, "code": "BAD_REQUEST", "error": f"缺少必填参数: {', '.join(missing)}"}), 400
+            return jsonify(
+                {"success": False, "code": "BAD_REQUEST", "error": f"缺少必填参数: {', '.join(missing)}"}), 400
 
         # ---------- 日期解析 ----------
         sd = parse_date_generic(start_date)
@@ -206,7 +208,6 @@ def details():
         else:
             # 多日：用户选 [sd, ed]，转换到 [sd, ed+1)
             ed = ed + timedelta(days=1)
-
 
         # ---------- 调用服务 ----------
         result = get_revenue_details(sd, ed, departments, limit=limit, offset=offset)
@@ -236,6 +237,8 @@ def details():
             "code": "SERVER_ERROR",
             "error": str(e)
         }), 500
+
+
 @bp.route("/timeseries", methods=["POST", "GET"])
 def timeseries():
     """
@@ -245,12 +248,13 @@ def timeseries():
     try:
         payload = request.get_json(silent=True) or {}
         start_date = payload.get("start_date") or request.args.get("start_date")
-        end_date   = payload.get("end_date")   or request.args.get("end_date")
+        end_date = payload.get("end_date") or request.args.get("end_date")
         departments = _parse_departments(payload)  # 兼容 department / departments 两种入参
 
         ok, missing = require_params({"start_date": start_date}, ["start_date"])
         if not ok:
-            return jsonify({"success": False, "code": "BAD_REQUEST", "error": f"缺少必填参数: {', '.join(missing)}"}), 400
+            return jsonify(
+                {"success": False, "code": "BAD_REQUEST", "error": f"缺少必填参数: {', '.join(missing)}"}), 400
 
         sd = parse_date_generic(start_date)
         ed = parse_date_generic(end_date) if end_date else None

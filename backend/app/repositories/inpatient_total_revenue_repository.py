@@ -169,7 +169,13 @@ class InpatientTotalRevenueRepository:
         offset: int = 0,
     ) -> Dict[str, Any]:
         """
-        明细查询（日期+科室聚合），使用 COUNT(*) OVER() 一次查出 total+rows，减少扫描次数。
+        明细查询（日期+科室聚合），仓储层只负责查原始值：
+        - 当前收入 revenue_raw
+        - 去年同期收入 ly_revenue_raw
+        - 上一周期收入 prev_revenue_raw
+        - 当前床日 bed_value
+        - 去年同期床日 bed_last_year
+        具体的同比/环比/趋势由应用层计算。
         """
         if end is None:
             end = start + timedelta(days=1)
@@ -283,30 +289,14 @@ class InpatientTotalRevenueRepository:
         ),
         final AS (
           SELECT
-            c.dt                             AS date,
-            c.dep_code                       AS department_code,
-            c.dep_name                       AS department_name,
-            ROUND(c.revenue_raw::numeric, 2) AS revenue,
-            CASE WHEN lr.ly_revenue_raw IS NULL OR lr.ly_revenue_raw = 0 THEN NULL
-                 ELSE ROUND((c.revenue_raw - lr.ly_revenue_raw) / lr.ly_revenue_raw * 100.0, 2)
-            END                              AS revenue_growth_pct,
-            CASE WHEN pr.prev_revenue_raw IS NULL OR pr.prev_revenue_raw = 0 THEN NULL
-                 ELSE ROUND((c.revenue_raw - pr.prev_revenue_raw) / pr.prev_revenue_raw * 100.0, 2)
-            END                              AS revenue_mom_growth_pct,
-            CASE
-              WHEN lr.ly_revenue_raw IS NULL OR lr.ly_revenue_raw = 0
-                   OR lb.bed_cnt IS NULL OR lb.bed_cnt = 0 THEN '持平/未知'
-              ELSE
-                CASE
-                  WHEN ((c.revenue_raw - lr.ly_revenue_raw) > 0.0001
-                        AND (cb.bed_cnt - lb.bed_cnt) > 0.0001) THEN '同向'
-                  WHEN ((c.revenue_raw - lr.ly_revenue_raw) < -0.0001
-                        AND (cb.bed_cnt - lb.bed_cnt) < -0.0001) THEN '同向'
-                  WHEN ABS(c.revenue_raw - lr.ly_revenue_raw) <= 0.0001
-                       OR ABS(cb.bed_cnt - lb.bed_cnt) <= 0.0001 THEN '持平/未知'
-                  ELSE '反向'
-                END
-            END                              AS trend
+            c.dt               AS date,
+            c.dep_code         AS department_code,
+            c.dep_name         AS department_name,
+            c.revenue_raw      AS revenue_raw,
+            lr.ly_revenue_raw  AS ly_revenue_raw,
+            pr.prev_revenue_raw AS prev_revenue_raw,
+            cb.bed_cnt         AS bed_value,
+            lb.bed_cnt         AS bed_last_year
           FROM cur_rev c
           LEFT JOIN ly_rev   lr ON lr.dt = c.dt AND lr.dep_code = c.dep_code
           LEFT JOIN prev_rev pr ON pr.dt = c.dt AND pr.dep_code = c.dep_code
@@ -328,13 +318,14 @@ class InpatientTotalRevenueRepository:
         return {"rows": rows, "total": total}
 
     def get_revenue_timeseries(
-        self,
-        start: date,
-        end: date,
-        departments=None,
+            self,
+            start: date,
+            end: date,
+            departments=None,
     ) -> List[Dict[str, Any]]:
         """
-        保持原 get_revenue_timeseries 的业务逻辑，只是挪到 Repository。
+        趋势查询：仓储层只查原始值（收入/床日及对比区间），
+        yoy/mom 等百分比全部交给应用层计算。
         """
         deps = _norm_deps(departments)
         length_days = (end - start).days
@@ -386,15 +377,16 @@ class InpatientTotalRevenueRepository:
           GROUP BY 1
         ),
 
+        -- 去年收入：先取“去年真实日期 src_date”，再 +1 年对齐到当前日期
         rev_ly_base AS (
-          SELECT (f.rcpt_date::date + INTERVAL '1 year') AS ly_dt, SUM(f.charges) AS charges
+          SELECT f.rcpt_date::date AS src_date, SUM(f.charges) AS charges
           FROM t_workload_inp_f f
           WHERE f.rcpt_date >= (%(start)s::timestamp - INTERVAL '1 year')
             AND f.rcpt_date <  (%(end)s::timestamp   - INTERVAL '1 year')
             {dep_live}
           GROUP BY 1
           UNION ALL
-          SELECT (x.rcpt_date::date + INTERVAL '1 year') AS ly_dt, SUM(x.charges) AS charges
+          SELECT x.rcpt_date::date AS src_date, SUM(x.charges) AS charges
           FROM t_dep_income_inp x
           WHERE x.rcpt_date >= (%(start)s::timestamp - INTERVAL '1 year')
             AND x.rcpt_date <  (%(end)s::timestamp   - INTERVAL '1 year')
@@ -402,7 +394,7 @@ class InpatientTotalRevenueRepository:
           GROUP BY 1
         ),
         rev_ly AS (
-          SELECT (ly_dt + INTERVAL '1 year')::date AS dt,
+          SELECT (src_date + INTERVAL '1 year')::date AS dt,
                  COALESCE(SUM(charges), 0) AS last_year
           FROM rev_ly_base
           GROUP BY 1
@@ -449,15 +441,16 @@ class InpatientTotalRevenueRepository:
           GROUP BY 1
         ),
 
+        -- 去年床日：同样使用 src_date + 1 年对齐
         bed_ly_base AS (
-          SELECT (r.adm_date::date + INTERVAL '1 year') AS ly_dt, COUNT(r.mdtrt_id) AS bed_cnt
+          SELECT r.adm_date::date AS src_date, COUNT(r.mdtrt_id) AS bed_cnt
           FROM t_workload_inbed_reg_f r
           WHERE r.adm_date >= (%(start)s::timestamp - INTERVAL '1 year')
             AND r.adm_date <  (%(end)s::timestamp   - INTERVAL '1 year')
             {bed_live}
           GROUP BY 1
           UNION ALL
-          SELECT (b.inbed_date::date + INTERVAL '1 year') AS ly_dt, SUM(b.amount) AS bed_cnt
+          SELECT b.inbed_date::date AS src_date, SUM(b.amount) AS bed_cnt
           FROM t_dep_count_inbed b
           WHERE b.inbed_date >= (%(start)s::timestamp - INTERVAL '1 year')
             AND b.inbed_date <  (%(end)s::timestamp   - INTERVAL '1 year')
@@ -466,7 +459,7 @@ class InpatientTotalRevenueRepository:
           GROUP BY 1
         ),
         bed_ly AS (
-          SELECT (ly_dt + INTERVAL '1 year')::date AS dt,
+          SELECT (src_date + INTERVAL '1 year')::date AS dt,
                  COALESCE(SUM(bed_cnt), 0) AS bed_last_year
           FROM bed_ly_base
           GROUP BY 1
@@ -513,34 +506,16 @@ class InpatientTotalRevenueRepository:
         )
 
         SELECT
-          dt AS date,
-          ROUND(revenue::numeric, 2) AS revenue,
-          CASE WHEN last_year       IS NULL THEN NULL ELSE ROUND(last_year::numeric, 2)       END AS last_year,
-          CASE WHEN prev_period     IS NULL THEN NULL ELSE ROUND(prev_period::numeric, 2)     END AS prev_period,
-          CASE WHEN bed_value       IS NULL THEN NULL ELSE ROUND(bed_value::numeric, 2)       END AS bed_value,
-          CASE WHEN bed_last_year   IS NULL THEN NULL ELSE ROUND(bed_last_year::numeric, 2)   END AS bed_last_year,
-          CASE WHEN bed_prev_period IS NULL THEN NULL ELSE ROUND(bed_prev_period::numeric, 2) END AS bed_prev_period,
-
-          CASE
-            WHEN last_year IS NULL OR last_year = 0 THEN NULL
-            ELSE ROUND((revenue - last_year) / last_year * 100.0, 2)
-          END AS yoy_pct,
-
-          CASE
-            WHEN prev_period IS NULL OR prev_period = 0 THEN NULL
-            ELSE ROUND((revenue - prev_period) / prev_period * 100.0, 2)
-          END AS mom_pct,
-
-          CASE
-            WHEN bed_last_year IS NULL OR bed_last_year = 0 THEN NULL
-            ELSE ROUND((bed_value - bed_last_year) / bed_last_year * 100.0, 2)
-          END AS bed_yoy_pct,
-
-          CASE
-            WHEN bed_prev_period IS NULL OR bed_prev_period = 0 THEN NULL
-            ELSE ROUND((bed_value - bed_prev_period) / bed_prev_period * 100.0, 2)
-          END AS bed_mom_pct
+          dt                AS date,
+          revenue           AS revenue,
+          last_year         AS last_year,
+          prev_period       AS prev_period,
+          bed_value         AS bed_value,
+          bed_last_year     AS bed_last_year,
+          bed_prev_period   AS bed_prev_period
         FROM joined
         ORDER BY dt;
         """
         return self._query_rows(sql, params)
+
+

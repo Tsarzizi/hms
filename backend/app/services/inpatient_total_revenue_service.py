@@ -44,16 +44,101 @@ def get_departments():
 
 def get_revenue_details(start, end=None, departments=None, limit=20, offset=0):
     """
-    明细：直接调用 Repository（Repository 里已经做了 COUNT(*) OVER 优化）
+    明细：
+    - Repository 只查原始值（当前/去年/上一期收入 + 床日）
+    - 这里负责算收入同比/环比、趋势等，再返回给路由/前端
     """
-    return repo.get_revenue_details(start, end, departments, limit=limit, offset=offset)
+    raw = repo.get_revenue_details(start, end, departments, limit=limit, offset=offset)
+
+    rows_out = []
+    for r in raw["rows"]:
+        # 原始值（仓储层已经把 Decimal/date 转成基本类型了）
+        curr = Decimal(str(r.get("revenue_raw") or "0"))
+        ly = Decimal(str(r.get("ly_revenue_raw") or "0"))
+        prev = Decimal(str(r.get("prev_revenue_raw") or "0"))
+        bed_curr = Decimal(str(r.get("bed_value") or "0"))
+        bed_ly = Decimal(str(r.get("bed_last_year") or "0"))
+
+        # 收入同比 / 环比（返回的是小数，例如 0.1234 表示 12.34%）
+        rev_growth = safe_pct_change(curr, ly)
+        rev_mom = safe_pct_change(curr, prev)
+
+        # 床日同比，用于趋势判断
+        bed_growth = safe_pct_change(bed_curr, bed_ly)
+
+        # 趋势判断，沿用之前的逻辑
+        trend = "持平/未知"
+        try:
+            rev_g = rev_growth if rev_growth is not None else DEC_0
+            bed_g = bed_growth if bed_growth is not None else DEC_0
+            if rev_g > DEC_POS_EPS and bed_g > DEC_POS_EPS:
+                trend = "同向"
+            elif rev_g < DEC_NEG_EPS and bed_g < DEC_NEG_EPS:
+                trend = "同向"
+            elif (rev_g > DEC_POS_EPS and bed_g < DEC_NEG_EPS) or (rev_g < DEC_NEG_EPS and bed_g > DEC_POS_EPS):
+                trend = "反向"
+        except Exception:
+            logger.exception("Error computing trend in get_revenue_details")
+
+        rows_out.append({
+            "date": r.get("date"),
+            "department_code": r.get("department_code"),
+            "department_name": r.get("department_name"),
+            # 收入本身保留两位小数
+            "revenue": float(curr.quantize(Decimal("0.01"))),
+            # 百分比：返回 12.34 表示 12.34%
+            "revenue_growth_pct": float(rev_growth * DEC_100) if rev_growth is not None else None,
+            "revenue_mom_growth_pct": float(rev_mom * DEC_100) if rev_mom is not None else None,
+            "trend": trend,
+        })
+
+    return {
+        "rows": rows_out,
+        "total": raw.get("total", 0),
+    }
+
 
 
 def get_revenue_timeseries(start, end, departments=None):
     """
-    趋势：直接调用 Repository
+    趋势：
+    - Repository 只查每日的收入/床日（当前/去年/上一期）原始值
+    - 这里负责算收入/床日的同比、环比百分比，保持前端字段不变
     """
-    return repo.get_revenue_timeseries(start, end, departments)
+    raw_rows = repo.get_revenue_timeseries(start, end, departments)
+
+    rows_out = []
+    for r in raw_rows:
+        rev = Decimal(str(r.get("revenue") or "0"))
+        ly = Decimal(str(r.get("last_year") or "0"))
+        prev = Decimal(str(r.get("prev_period") or "0"))
+        bed = Decimal(str(r.get("bed_value") or "0"))
+        bed_ly = Decimal(str(r.get("bed_last_year") or "0"))
+        bed_prev = Decimal(str(r.get("bed_prev_period") or "0"))
+
+        yoy = safe_pct_change(rev, ly)
+        mom = safe_pct_change(rev, prev)
+        bed_yoy = safe_pct_change(bed, bed_ly)
+        bed_mom = safe_pct_change(bed, bed_prev)
+
+        rows_out.append({
+            "date": r.get("date"),
+            # 数值统一保留两位小数
+            "revenue": float(rev.quantize(Decimal("0.01"))) if rev is not None else 0.0,
+            "last_year": float(ly.quantize(Decimal("0.01"))) if ly is not None else None,
+            "prev_period": float(prev.quantize(Decimal("0.01"))) if prev is not None else None,
+            "bed_value": float(bed.quantize(Decimal("0.01"))) if bed is not None else 0.0,
+            "bed_last_year": float(bed_ly.quantize(Decimal("0.01"))) if bed_ly is not None else None,
+            "bed_prev_period": float(bed_prev.quantize(Decimal("0.01"))) if bed_prev is not None else None,
+            # 百分比字段，前端已经在用：12.34 表示 12.34%
+            "yoy_pct": float(yoy * DEC_100) if yoy is not None else None,
+            "mom_pct": float(mom * DEC_100) if mom is not None else None,
+            "bed_yoy_pct": float(bed_yoy * DEC_100) if bed_yoy is not None else None,
+            "bed_mom_pct": float(bed_mom * DEC_100) if bed_mom is not None else None,
+        })
+
+    return rows_out
+
 
 
 def get_revenue_summary(start_date, end_date, departments=None):
