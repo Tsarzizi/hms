@@ -1,283 +1,601 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Pagination from "../components/Pagination";
+import LineChart, { CompareKind } from "../components/LineChart";
 
-// 后端基础路径
-const API_BASE = "/api/inpatient_total_revenue";
+// 支持环境变量覆盖：VITE_API_BASE
+const API_BASE =
+  typeof import.meta !== "undefined" &&
+  (import.meta as any).env &&
+  (import.meta as any).env.VITE_API_BASE
+    ? (import.meta as any).env.VITE_API_BASE
+    : "/api/inpatient_total_revenue";
 
-/** 返回 YYYY-MM-DD（可带 offset 天数） */
+type Trend = "同向" | "反向" | "持平/未知" | string;
+
+interface DepartmentOption {
+  code: string;
+  name: string;
+}
+
+interface RevenueSummaryStd {
+  current: number;
+  growth_rate?: number | null;
+  mom_growth_rate?: number | null;
+  bed_growth_rate?: number | null;
+  bed_mom_growth_rate?: number | null;
+  trend?: Trend;
+}
+
+interface DetailsRow {
+  date: string;
+  department_code: string;
+  department_name?: string;
+  revenue: number;
+  revenue_growth_pct?: number | null;
+  revenue_mom_growth_pct?: number | null;
+  trend?: Trend;
+  doctor_id?: string;
+  doctor_name?: string;
+}
+
+interface InitResponse {
+  success: boolean;
+  date: string;
+  departments?: DepartmentOption[];
+  summary?: RevenueSummaryStd;
+}
+
+interface SummaryResponse {
+  success: boolean;
+  date?: string;
+  date_range?: { start: string; end: string };
+  departments?: string[] | null;
+  summary: RevenueSummaryStd;
+}
+
+interface DetailsResponse {
+  success: boolean;
+  date?: string;
+  date_range?: { start: string; end: string };
+  departments?: string[] | null;
+  rows: DetailsRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// /timeseries 原始返回的行
+interface TSRow {
+  date: string;
+  revenue: number;
+  last_year: number | null;
+  // 后端目前只保证有 yoy_pct / mom_pct；床日的先做成可选，后端补上即可用
+  yoy_pct: number | null;
+  mom_pct: number | null;
+  bed_yoy_pct?: number | null;
+  bed_mom_pct?: number | null;
+}
+
+interface TSResponse {
+  success: boolean;
+  rows: TSRow[];
+  date?: string;
+  date_range?: { start: string; end: string };
+  departments?: string[] | null;
+}
+
+type SortKey =
+  | "date"
+  | "department"
+  | "doctor"
+  | "revenue"
+  | "revenue_yoy"
+  | "revenue_mom";
+
+function getPrevRange(startStr: string, endStr?: string) {
+  const parse = (s: string) => new Date(s);
+  const fmt = (d: Date) => d.toISOString().split("T")[0];
+  const start = parse(startStr);
+  const end = endStr ? parse(endStr) : new Date(startStr);
+  const oneDay = 24 * 60 * 60 * 1000;
+
+  const sameDay = fmt(start) === fmt(end);
+  const lenDays = sameDay ? 1 : Math.floor((+end - +start) / oneDay) + 1;
+
+  const prevEndExclusive = start;
+  const prevStart = new Date(prevEndExclusive.getTime() - lenDays * oneDay);
+  return { prevStart: fmt(prevStart), prevEnd: fmt(prevEndExclusive) };
+}
+
+async function apiFetch(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = 60000
+) {
+  const ctl = new AbortController();
+  const id = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: ctl.signal });
+    return res;
+  } catch (err: any) {
+    const msg =
+      err?.name === "AbortError"
+        ? "请求超时：无法连接后端服务。"
+        : "网络错误：可能后端未启动或代理未连通。";
+    const e: any = new Error(msg);
+    e.original = err;
+    throw e;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+async function fetchSummaryAPI({
+  start,
+  end,
+  deps,
+}: {
+  start: string;
+  end: string;
+  deps?: string[] | null;
+}) {
+  const payload: Record<string, any> = { start_date: start, end_date: end };
+  if (deps && deps.length) payload.departments = deps;
+
+  const res = await apiFetch(`${API_BASE}/summary`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`SUMMARY 请求失败：${res.status}`);
+  return res.json() as Promise<SummaryResponse>;
+}
+
+async function fetchTimeseriesAPI({
+  start,
+  end,
+  deps,
+}: {
+  start: string;
+  end: string;
+  deps?: string[] | null;
+}) {
+  const payload: Record<string, any> = { start_date: start, end_date: end };
+  if (deps && deps.length) payload.departments = deps;
+
+  const res = await apiFetch(`${API_BASE}/timeseries`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`TIMESERIES 请求失败：${res.status}`);
+  return res.json() as Promise<TSResponse>;
+}
+
+async function maybeEnsureMoM({
+  currentSummary,
+  start,
+  end,
+  deps,
+}: {
+  currentSummary: any;
+  start: string;
+  end: string;
+  deps?: string[] | null;
+}) {
+  const hasMom =
+    typeof currentSummary?.mom_growth_rate === "number" &&
+    Number.isFinite(currentSummary.mom_growth_rate);
+  if (hasMom) return currentSummary;
+
+  const { prevStart, prevEnd } = getPrevRange(start, end);
+  const prevPayload = await fetchSummaryAPI({
+    start: prevStart,
+    end: prevEnd,
+    deps,
+  });
+  const prev = extractSummaryFromStd(prevPayload);
+  const curTotal =
+    typeof currentSummary?.total_revenue === "number"
+      ? currentSummary.total_revenue
+      : undefined;
+  const prevTotal =
+    typeof prev?.total_revenue === "number" ? prev.total_revenue : undefined;
+
+  let mom: number | undefined;
+  if (
+    typeof curTotal === "number" &&
+    typeof prevTotal === "number" &&
+    prevTotal !== 0
+  ) {
+    mom = ((curTotal - prevTotal) / prevTotal) * 100;
+  }
+  return {
+    ...currentSummary,
+    ...(typeof mom === "number" && Number.isFinite(mom)
+      ? { mom_growth_rate: mom }
+      : {}),
+  };
+}
+
 function getToday(offsetDays = 0) {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return d.toISOString().split("T")[0];
 }
 
-/** 将标准后端响应映射到页面使用的 summary 结构 */
+function formatDate(dateStr?: string | null) {
+  if (!dateStr) return "-";
+  const d = new Date(dateStr);
+  if (isNaN(+d)) return String(dateStr);
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
 function extractSummaryFromStd(payload: any) {
-  // /init 返回: { success, date, departments, summary, total_revenue? }
-  // /summary 返回: { success, date|date_range, department, summary }
+  const rev = payload?.revenue || {};
   const std = payload?.summary || {};
-  const current = Number(std.current ?? NaN);
-  const growth = Number(std.growth_rate ?? NaN);
-  const trend = typeof std.trend === "string" ? std.trend : undefined;
+  const bed = (payload as any)?.bed || {};
+
+  const toNum = (v: any) => {
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (typeof v === "string") {
+      const s = v.replace(/[\s,]/g, "").replace(/%$/, "");
+      const n = Number(s);
+      if (Number.isFinite(n)) return n;
+    }
+    return undefined;
+  };
 
   const out: any = {};
-  if (Number.isFinite(current)) out.total_revenue = current;
-  if (Number.isFinite(growth)) out.yoy_growth_rate = growth; // 单位: %
-  if (trend) out.trend = trend;
+  const current = toNum(rev.current_total ?? std.current);
+  const yoy = toNum(
+    rev.growth_rate_pct ?? std.growth_rate ?? std.growth_rate_pct
+  );
+  const mom = toNum(
+    rev.mom_growth_pct ?? std.mom_growth_rate ?? std.mom ?? std.mom_growth_pct
+  );
+  const bedYoy = toNum(
+    (payload as any)?.bed_growth_pct ??
+      bed.growth_rate_pct ??
+      (std as any)?.bed_growth_rate ??
+      (std as any)?.bed_growth_pct
+  );
+  const bedMom = toNum(
+    (payload as any)?.bed_mom_growth_pct ??
+      bed.mom_growth_pct ??
+      (std as any)?.bed_mom_growth_rate ??
+      (std as any)?.bed_mom_growth_pct
+  );
+
+  if (typeof current !== "undefined") out.total_revenue = current;
+  if (typeof yoy !== "undefined") out.yoy_growth_rate = yoy;
+  if (typeof mom !== "undefined") out.mom_growth_rate = mom;
+  if (typeof bedYoy !== "undefined") out.bed_day_growth_rate = bedYoy;
+  if (typeof bedMom !== "undefined") out.bed_day_mom_growth_rate = bedMom;
+
+  if (typeof (payload?.trend ?? std.trend) === "string")
+    out.trend = payload?.trend ?? std.trend;
+
   return Object.keys(out).length ? out : null;
 }
 
-/** 构建 /summary 请求体：0 个（全院）或 1 个科室编码 */
-function buildSummaryPayload(opts: {
-  startDate: string;
-  endDate?: string;
-  selectedDepCodes: Set<string>;
-}) {
-  const { startDate, endDate, selectedDepCodes } = opts;
+function deriveDoctors(rows: any[]) {
+  const map = new Map<string, string>();
+  for (const r of rows || []) {
+    let id: any =
+      (r as any)?.doctor_id ??
+      (r as any)?.doctorCode ??
+      (r as any)?.doctor ??
+      null;
+    let name: any =
+      (r as any)?.doctor_name ??
+      (r as any)?.doctorName ??
+      (r as any)?.doctor ??
+      null;
 
-  // 后端支持单日自动化: 没 endDate 或 endDate===startDate -> [start, start+1)
-  const payload: any = { start_date: startDate };
-
-  if (endDate && endDate !== startDate) {
-    payload.end_date = endDate;
+    if (id == null && name != null) id = String(name);
+    if (id != null) {
+      const key = String(id);
+      if (!map.has(key)) map.set(key, String(name ?? id));
+    }
   }
-
-  // 选 1 个就筛该科室，否则传空=全院
-  if (selectedDepCodes.size === 1) {
-    payload.department = Array.from(selectedDepCodes)[0];
-  } else {
-    payload.department = null;
-  }
-
-  return payload;
-}
-
-/** 简单单选下拉（支持“全院”） */
-function SingleSelectDropdown({
-  label,
-  items,
-  value,
-  onChange,
-  allowAll = true,
-}: {
-  label: string;
-  items: { key: string; value: string; text: string }[];
-  value: string | null;
-  onChange: (v: string | null) => void;
-  allowAll?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  const filtered = useMemo(() => {
-    const kw = q.trim().toLowerCase();
-    if (!kw) return items;
-    return items.filter((it) => String(it.text).toLowerCase().includes(kw));
-  }, [items, q]);
-
-  useEffect(() => {
-    const onDoc = (e: any) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("click", onDoc);
-    return () => document.removeEventListener("click", onDoc);
-  }, []);
-
-  const currentText =
-    value == null
-      ? "全院"
-      : items.find((x) => x.value === value)?.text ?? "未知科室";
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full border rounded px-3 py-2 flex items-center justify-between text-left"
-      >
-        <span className="text-sm text-gray-700">
-          {label}：<span className="text-gray-900">{currentText}</span>
-        </span>
-        <svg
-          className={`w-4 h-4 transition-transform ${open ? "rotate-180" : ""}`}
-          viewBox="0 0 20 20"
-          fill="currentColor"
-        >
-          <path d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.24 4.38a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" />
-        </svg>
-      </button>
-      {open && (
-        <div className="absolute z-20 mt-2 w-full rounded border bg-white shadow">
-          <div className="px-3 py-2 border-b text-sm text-gray-600">{label}</div>
-          <div className="px-3 py-2 border-b">
-            <div className="relative">
-              <input
-                className="w-full border rounded px-3 py-1.5 pr-8 text-sm"
-                placeholder={`搜索${label}...`}
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-              />
-              {q && (
-                <button
-                  type="button"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400"
-                  onClick={() => setQ("")}
-                >
-                  ×
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="max-h-56 overflow-auto p-2 space-y-1">
-            {allowAll && (
-              <button
-                className="w-full text-left px-2 py-1 rounded hover:bg-gray-50 text-sm"
-                type="button"
-                onClick={() => {
-                  onChange(null);
-                  setOpen(false);
-                }}
-              >
-                全院
-              </button>
-            )}
-            {items.length === 0 ? (
-              <div className="text-sm text-gray-400 px-2 py-1">暂无数据</div>
-            ) : filtered.length === 0 ? (
-              <div className="text-sm text-gray-400 px-2 py-1">无匹配结果</div>
-            ) : (
-              filtered.map((it) => (
-                <button
-                  key={it.key}
-                  type="button"
-                  className="w-full text-left px-2 py-1 rounded hover:bg-gray-50 text-sm"
-                  onClick={() => {
-                    onChange(it.value);
-                    setOpen(false);
-                  }}
-                >
-                  {it.text}
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  return Array.from(map, ([id, name]) => ({ id, name }));
 }
 
 export default function InpatientTotalRevenue() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [departments, setDepartments] = useState<any[]>([]);
+
+  const [departments, setDepartments] = useState<DepartmentOption[]>([]);
+  const [doctors, setDoctors] = useState<{ id: string; name: string }[]>([]);
   const [summary, setSummary] = useState<any>(null);
-  const [details, setDetails] = useState<any[]>([]); // /details 明细
 
-  // 单日统计：默认今天；区间统计：填写 endDate 即可
-  const [startDate, setStartDate] = useState(getToday(0));
-  const [endDate, setEndDate] = useState<string>("");
-
-  // 科室筛选（单选，null=全院）
-  const [selectedDepCode, setSelectedDepCode] = useState<string | null>(null);
-
-  // ========== 明细分页（20/页） ==========
+  // 明细（服务端分页）
   const rowsPerPage = 20;
   const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [details, setDetails] = useState<DetailsRow[]>([]);
+  const pagedRows = details;
 
-  const totalRows = details.length;
-  const pageCount = Math.max(1, Math.ceil(totalRows / rowsPerPage));
-  const pagedRows = useMemo(() => {
-    const start = (page - 1) * rowsPerPage;
-    return details.slice(start, start + rowsPerPage);
-  }, [details, page]);
+  // 排序
+  const [sortKey, setSortKey] = useState<SortKey>("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
+  // 趋势数据：只显示“收入 + 床日”的增长率折线图
+  const [tsRows, setTsRows] = useState<TSRow[]>([]);
+  const [compare, setCompare] = useState<CompareKind>("yoy"); // 默认同比
+
+  // 视图切换（数据表 / 趋势图）
+  const [viewMode, setViewMode] = useState<"details" | "chart">("details");
   useEffect(() => {
-    if (page > pageCount) setPage(pageCount);
-    if (page < 1) setPage(1);
-  }, [page, pageCount]);
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const v = sp.get("view");
+      if (v === "chart" || v === "details")
+        setViewMode(v as "details" | "chart");
+    } catch {
+      // ignore
+    }
+  }, []);
+  const setAndSyncView = (v: "details" | "chart") => {
+    setViewMode(v);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("view", v);
+      window.history.replaceState({}, "", url);
+    } catch {
+      // ignore
+    }
+  };
 
-  /** 拉取明细 */
-  async function fetchDetails(start: string, end?: string, depCode?: string | null) {
-    const payload: any = { start_date: start };
-    if (end && end !== start) payload.end_date = end; // 留空或等于 start -> 后端单日
-    if (depCode) payload.department = depCode;
+  const todayStr = getToday(0);
+  // 开始&结束日期：初始化即为“今天=今天”
+  const [startDate, setStartDate] = useState(todayStr);
+  const [endDate, setEndDate] = useState(todayStr);
 
-    const res = await fetch(`${API_BASE}/details`, {
+  // 科室/医生多选 + 搜索
+  const [selectedDeps, setSelectedDeps] = useState<string[]>([]);
+  const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
+  const [depDropdownOpen, setDepDropdownOpen] = useState(false);
+  const [docDropdownOpen, setDocDropdownOpen] = useState(false);
+  const [depSearch, setDepSearch] = useState("");
+  const [docSearch, setDocSearch] = useState("");
+
+  const filteredDepartments = useMemo(() => {
+    const kw = depSearch.trim();
+    if (!kw) return departments;
+    return departments.filter(
+      (d) => d.name.includes(kw) || d.code.includes(kw)
+    );
+  }, [depSearch, departments]);
+
+  const filteredDoctors = useMemo(() => {
+    const kw = docSearch.trim();
+    if (!kw) return doctors;
+    return doctors.filter(
+      (d) => d.name.includes(kw) || d.id.includes(kw)
+    );
+  }, [docSearch, doctors]);
+
+  const sortedRows = useMemo(() => {
+    // 先按医生筛选
+    const base = (() => {
+      if (!selectedDocs.length) return pagedRows;
+      const docSet = new Set(selectedDocs);
+      return pagedRows.filter((r) => {
+        const id =
+          (r as any).doctor_id ??
+          (r as any).doctor ??
+          (r as any).doctor_name ??
+          null;
+        const name =
+          (r as any).doctor_name ??
+          (r as any).doctor ??
+          (r as any).doctor_id ??
+          null;
+        if (id != null && docSet.has(String(id))) return true;
+        if (name != null && docSet.has(String(name))) return true;
+        return false;
+      });
+    })();
+
+    const getSortValue = (r: DetailsRow): any => {
+      switch (sortKey) {
+        case "date":
+          return new Date(r.date);
+        case "department":
+          return r.department_name || r.department_code || "";
+        case "doctor":
+          return (
+            (r as any).doctor_name ||
+            (r as any).doctor_id ||
+            (r as any).doctor ||
+            ""
+          );
+        case "revenue":
+          return typeof r.revenue === "number" ? r.revenue : null;
+        case "revenue_yoy":
+          return r.revenue_growth_pct ?? null;
+        case "revenue_mom": {
+          const raw =
+            (r as any).revenue_mom_growth_pct ??
+            (r as any).mom_growth_pct ??
+            (r as any).mom_growth_rate ??
+            (r as any)["收入环比增长率"] ??
+            null;
+          if (raw == null) return null;
+          const n =
+            typeof raw === "number"
+              ? raw
+              : Number(String(raw).replace(/[\s,%]/g, ""));
+          return Number.isFinite(n) ? n : null;
+        }
+        default:
+          return null;
+      }
+    };
+
+    const cmp = (a: DetailsRow, b: DetailsRow) => {
+      const va = getSortValue(a);
+      const vb = getSortValue(b);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+
+      if (va instanceof Date && vb instanceof Date) {
+        return va.getTime() - vb.getTime();
+      }
+      if (typeof va === "number" && typeof vb === "number") {
+        return va - vb;
+      }
+      const sa = String(va);
+      const sb = String(vb);
+      return sa.localeCompare(sb, "zh-CN");
+    };
+
+    const sign = sortDir === "asc" ? 1 : -1;
+    const arr = [...base];
+    arr.sort((a, b) => cmp(a, b) * sign);
+    return arr;
+  }, [pagedRows, selectedDocs, sortKey, sortDir]);
+
+  async function fetchDetails(
+    start: string,
+    end: string,
+    deps?: string[] | null,
+    pageNo = 1
+  ) {
+    const limit = rowsPerPage;
+    const offset = (pageNo - 1) * rowsPerPage;
+
+    const payload: Record<string, any> = {
+      start_date: start,
+      end_date: end,
+      limit,
+      offset,
+    };
+    if (deps && deps.length) payload.departments = deps;
+
+    const res = await apiFetch(`${API_BASE}/details`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(`DETAILS 请求失败：${res.status}`);
-    const data = await res.json();
-    setDetails(Array.isArray(data?.rows) ? data.rows : []);
-    setPage(1); // 刷新后回到第一页
+
+    const data = (await res.json()) as DetailsResponse;
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    setDetails(rows);
+    setTotal(
+      Number.isFinite((data?.total as any) ?? NaN)
+        ? Number(data.total)
+        : rows.length
+    );
+
+    const ds = deriveDoctors(rows);
+    setDoctors(ds);
+    // 清理已选但不再存在的医生
+    setSelectedDocs((prev) =>
+      prev.filter((id) => ds.some((d) => d.id === id))
+    );
   }
 
-  // 初始化：/init（今日 + 部门），并获取今日明细
+  async function fetchTimeseries(
+    start: string,
+    end: string,
+    deps?: string[] | null
+  ) {
+    const data = await fetchTimeseriesAPI({ start, end, deps });
+    setTsRows(Array.isArray(data?.rows) ? data.rows : []);
+  }
+
+  // 初始化：加载科室 + 今日汇总 + 今日明细 + 今日趋势
   useEffect(() => {
     const init = async () => {
       setLoading(true);
       setError("");
       try {
-        const res = await fetch(`${API_BASE}/init`);
+        const res = await apiFetch(`${API_BASE}/init`);
         if (!res.ok) throw new Error(`INIT 请求失败：${res.status}`);
-        const data = await res.json();
 
-        const depList = Array.isArray(data?.departments) ? data.departments : [];
-        setDepartments(depList);
+        const data = (await res.json()) as InitResponse;
+        setDepartments(Array.isArray(data?.departments) ? data.departments : []);
 
-        const extracted = extractSummaryFromStd(data);
-        setSummary(extracted);
+        const parsed = extractSummaryFromStd(data);
+        setSummary(parsed);
 
-        // 今日单日明细
-        await fetchDetails(getToday(0));
+        const today = getToday(0);
+        setStartDate(today);
+        setEndDate(today);
+        setPage(1);
+
+        await Promise.all([
+          fetchDetails(today, today, null, 1),
+          fetchTimeseries(today, today, null),
+        ]);
       } catch (e: any) {
         setError(e?.message || String(e));
       } finally {
         setLoading(false);
       }
     };
-    init();
+    void init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // /summary 提交
+  async function fetchSummaryAPIWrap(
+    override?: { start: string; end: string; deps?: string[] | null }
+  ) {
+    const start = override?.start ?? startDate;
+    const end = override?.end ?? endDate;
+    const deps =
+      override?.deps ?? (selectedDeps.length ? selectedDeps : null);
+
+    const data = await fetchSummaryAPI({
+      start,
+      end,
+      deps,
+    });
+    const curSum = extractSummaryFromStd(data);
+    const sumWithMom = await maybeEnsureMoM({
+      currentSummary: curSum,
+      start,
+      end,
+      deps,
+    });
+    setSummary(sumWithMom);
+  }
+
   const onSubmitSummary = async (e?: React.FormEvent) => {
     e?.preventDefault?.();
     setError("");
-
     if (!startDate) {
       setError("请选择开始日期");
       return;
     }
-    if (endDate && new Date(startDate) > new Date(endDate)) {
+    if (!endDate) {
+      setError("请选择结束日期");
+      return;
+    }
+    if (new Date(startDate) > new Date(endDate)) {
       setError("开始日期不能晚于结束日期");
       return;
     }
 
-    const payload = buildSummaryPayload({
-      startDate,
-      endDate: endDate || undefined, // 空=单日
-      selectedDepCodes: selectedDepCode ? new Set([selectedDepCode]) : new Set(),
-    });
-
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/summary`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+      const deps = selectedDeps.length ? selectedDeps : null;
+      await fetchSummaryAPIWrap({
+        start: startDate,
+        end: endDate,
+        deps,
       });
-      if (!res.ok) throw new Error(`SUMMARY 请求失败：${res.status}`);
-      const data = await res.json();
-      const extracted = extractSummaryFromStd(data);
-      setSummary(extracted);
+      setPage(1);
 
-      // 同步刷新明细
-      await fetchDetails(startDate, endDate || undefined, selectedDepCode || null);
+      await Promise.all([
+        fetchDetails(startDate, endDate, deps, 1),
+        fetchTimeseries(startDate, endDate, deps),
+      ]);
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -285,187 +603,630 @@ export default function InpatientTotalRevenue() {
     }
   };
 
-  const onReset = () => {
-    setStartDate(getToday(0)); // 重置为今天
-    setEndDate("");
-    setSelectedDepCode(null);
+  const onReset = async () => {
+    const today = getToday(0);
+    setStartDate(today);
+    setEndDate(today);
+    setSelectedDeps([]);
+    setSelectedDocs([]);
+    setDepSearch("");
+    setDocSearch("");
     setError("");
+    setPage(1);
+    setCompare("yoy");
+    setSortKey("date");
+    setSortDir("desc");
+
+    setLoading(true);
+    try {
+      await fetchSummaryAPIWrap({ start: today, end: today, deps: null });
+      await Promise.all([
+        fetchDetails(today, today, null, 1),
+        fetchTimeseries(today, today, null),
+      ]);
+    } catch (e: any) {
+      setError(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const depItems = useMemo(
-    () =>
-      departments.map((d: any, i: number) => ({
-        key: `${d?.code ?? ""}__${i}`,
-        value: d?.code,
-        text: d?.name ?? d?.code ?? "未知科室",
-      })),
-    [departments]
-  );
+  const handleToggleDep = (code: string) => {
+    setSelectedDeps((prev) =>
+      prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]
+    );
+  };
+
+  const handleToggleDoc = (id: string) => {
+    setSelectedDocs((prev) =>
+      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
+    );
+  };
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortDir(key === "date" ? "desc" : "asc");
+    }
+  };
+
+  const renderSortIcon = (key: SortKey) => {
+    if (sortKey !== key) return <span className="text-xs text-gray-400">↕</span>;
+    return (
+      <span className="text-xs text-gray-500">
+        {sortDir === "asc" ? "↑" : "↓"}
+      </span>
+    );
+  };
+
+  const depSummaryLabel =
+    selectedDeps.length === 0
+      ? "全部科室"
+      : selectedDeps.length === 1
+      ? departments.find((d) => d.code === selectedDeps[0])?.name ||
+        selectedDeps[0]
+      : `已选 ${selectedDeps.length} 个科室`;
+
+  const docSummaryLabel =
+    selectedDocs.length === 0
+      ? "全部医生"
+      : selectedDocs.length === 1
+      ? doctors.find((d) => d.id === selectedDocs[0])?.name ||
+        selectedDocs[0]
+      : `已选 ${selectedDocs.length} 位医生`;
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-xl font-bold">住院收入分析</h1>
-      {error && <div className="text-red-500">错误：{error}</div>}
+      <h1 className="text-xl font-bold mb-2 text-left">住院收入分析</h1>
 
-      {/* 查询条件 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div>
-            <label className="mr-2">开始日期：</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="border rounded px-2 py-1"
-            />
-          </div>
-          <div>
-            <label className="ml-2 mr-2">结束日期（可选）：</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="border rounded px-2 py-1"
-              placeholder="留空=单日"
-            />
+      {error && (
+        <div className="text-red-500 text-left space-y-1">
+          <div>错误：{error}</div>
+          <div className="text-xs text-gray-600">
+            如果提示“网络错误/请求超时”，多为前端代理未连通或后端未启动。开发时可设置{" "}
+            <code>VITE_API_BASE</code> 指向后端地址，或检查 Vite 代理与后端服务。
           </div>
         </div>
+      )}
 
-        <div className="grid grid-cols-1 gap-4">
-          <SingleSelectDropdown
-            label="科室"
-            items={depItems}
-            value={selectedDepCode}
-            onChange={setSelectedDepCode}
-            allowAll
+      {/* 筛选区域 */}
+      <form
+        onSubmit={onSubmitSummary}
+        className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end text-left bg-white p-4 rounded-lg border"
+      >
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1 flex items-center gap-1">
+            开始日期<span className="text-red-500">*</span>
+          </label>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            className="border rounded px-2 py-1 text-left"
           />
-          <div className="mt-1 text-xs text-gray-600">
-            科室总数：{Array.isArray(departments) ? departments.length : 0}
-            {selectedDepCode ? `；已选：${selectedDepCode}` : "；已选：全院"}
+        </div>
+
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-600 mb-1 flex items-center gap-1">
+            结束日期<span className="text-red-500">*</span>
+          </label>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="border rounded px-2 py-1 text-left"
+          />
+        </div>
+
+        <div className="flex flex-col gap-3">
+          {/* 科室多选 */}
+          <div className="flex-1">
+            <label className="text-sm text-gray-600 mb-1">科室筛选</label>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setDepDropdownOpen((o) => !o)}
+                className="w-full border rounded px-2 py-1 flex justify-between items-center text-left"
+              >
+                <span className="truncate">{depSummaryLabel}</span>
+                <span className="text-xs text-gray-500">
+                  {depDropdownOpen ? "▲" : "▼"}
+                </span>
+              </button>
+              {depDropdownOpen && (
+                <div className="absolute z-20 mt-1 w-72 max-h-80 overflow-auto border bg-white rounded shadow">
+                  <div className="p-2 border-b">
+                    <input
+                      placeholder="搜索科室名称/编码"
+                      value={depSearch}
+                      onChange={(e) => setDepSearch(e.target.value)}
+                      className="w-full border rounded px-2 py-1 text-sm"
+                    />
+                  </div>
+                  <div className="max-h-60 overflow-auto">
+                    {filteredDepartments.length === 0 ? (
+                      <div className="p-2 text-xs text-gray-400">
+                        没有匹配的科室
+                      </div>
+                    ) : (
+                      filteredDepartments.map((d) => (
+                        <label
+                          key={d.code}
+                          className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 cursor-pointer text-sm"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedDeps.includes(d.code)}
+                            onChange={() => handleToggleDep(d.code)}
+                          />
+                          <span className="truncate">
+                            {d.name} ({d.code})
+                          </span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                  <div className="p-2 border-t flex justify-between text-xs text-gray-600">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedDeps(filteredDepartments.map((d) => d.code))
+                      }
+                      className="hover:text-blue-600"
+                    >
+                      全选当前列表
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDeps([])}
+                      className="hover:text-blue-600"
+                    >
+                      清空
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 医生多选（本地） */}
+          <div className="flex-1">
+            <label className="text-sm text-gray-600 mb-1">
+              医生筛选（本地，不请求后端）
+            </label>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setDocDropdownOpen((o) => !o)}
+                className="w-full border rounded px-2 py-1 flex justify-between items-center text-left"
+              >
+                <span className="truncate">{docSummaryLabel}</span>
+                <span className="text-xs text-gray-500">
+                  {docDropdownOpen ? "▲" : "▼"}
+                </span>
+              </button>
+              {docDropdownOpen && (
+                <div className="absolute z-20 mt-1 w-72 max-h-80 overflow-auto border bg-white rounded shadow">
+                  <div className="p-2 border-b">
+                    <input
+                      placeholder="搜索医生姓名/编号"
+                      value={docSearch}
+                      onChange={(e) => setDocSearch(e.target.value)}
+                      className="w-full border rounded px-2 py-1 text-sm"
+                    />
+                  </div>
+                  <div className="max-h-60 overflow-auto">
+                    {filteredDoctors.length === 0 ? (
+                      <div className="p-2 text-xs text-gray-400">
+                        暂无医生数据
+                      </div>
+                    ) : (
+                      filteredDoctors.map((d) => (
+                        <label
+                          key={d.id}
+                          className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 cursor-pointer text-sm"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedDocs.includes(d.id)}
+                            onChange={() => handleToggleDoc(d.id)}
+                          />
+                          <span className="truncate">
+                            {d.name} ({d.id})
+                          </span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                  <div className="p-2 border-t flex justify-between text-xs text-gray-600">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedDocs(filteredDoctors.map((d) => d.id))
+                      }
+                      className="hover:text-blue-600"
+                    >
+                      全选当前列表
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDocs([])}
+                      className="hover:text-blue-600"
+                    >
+                      清空
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+
+        <div className="flex items-center justify-start gap-3 md:col-span-1">
+          <button
+            type="submit"
+            disabled={loading}
+            className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-60 w-full"
+          >
+            {loading ? "查询中..." : "应用筛选"}
+          </button>
+          <button
+            type="button"
+            onClick={onReset}
+            disabled={loading}
+            className="px-4 py-2 rounded border bg-white disabled:opacity-60 w-full"
+          >
+            重置
+          </button>
+        </div>
+      </form>
 
       {/* 汇总卡片 */}
       <section className="p-4 border rounded-lg bg-white">
-        <h2 className="text-lg font-semibold mb-3">汇总</h2>
-        <form className="grid grid-cols-1 md:grid-cols-3 gap-4" onSubmit={onSubmitSummary}>
-          <div className="flex flex-col">
-            <label className="text-sm text-gray-600 mb-1">总收入</label>
-            <input
-              readOnly
-              className="border rounded px-2 py-1 bg-gray-50"
-              value={
-                summary && typeof summary.total_revenue === "number"
-                  ? summary.total_revenue.toLocaleString()
-                  : "-"
+        <h2 className="text-lg font-semibold mb-3 text-left">汇总概览</h2>
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 text-left text-sm">
+          <div className="space-y-1">
+            <div className="text-gray-600">总收入</div>
+            <div className="text-lg font-mono">
+              {summary?.total_revenue?.toLocaleString?.() ?? "-"}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-gray-600">收入同比增长 (YoY)</div>
+            <div
+              className={
+                typeof summary?.yoy_growth_rate === "number"
+                  ? summary.yoy_growth_rate >= 0
+                    ? "text-green-600"
+                    : "text-red-600"
+                  : ""
               }
-            />
-          </div>
-          <div className="flex flex-col">
-            <label className="text-sm text-gray-600 mb-1">收入同比增长 (YoY)</label>
-            <input
-              readOnly
-              className="border rounded px-2 py-1 bg-gray-50"
-              value={
-                summary && typeof summary.yoy_growth_rate === "number"
-                  ? `${summary.yoy_growth_rate.toFixed(2)}%`
-                  : "-"
-              }
-            />
-          </div>
-          <div className="flex flex-col">
-            <label className="text-sm text-gray-600 mb-1">趋势（收入 vs 床日）</label>
-            <input
-              readOnly
-              className="border rounded px-2 py-1 bg-gray-50"
-              value={summary && summary.trend ? summary.trend : "-"}
-            />
-          </div>
-
-          <div className="md:col-span-3 flex items-center gap-3 mt-2">
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-60"
             >
-              {loading ? "查询中..." : "查询 / 刷新"}
+              {typeof summary?.yoy_growth_rate === "number"
+                ? `${summary.yoy_growth_rate.toFixed(2)}%`
+                : "-"}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-gray-600">收入环比增长 (MoM)</div>
+            <div
+              className={
+                typeof summary?.mom_growth_rate === "number"
+                  ? summary.mom_growth_rate >= 0
+                    ? "text-green-600"
+                    : "text-red-600"
+                  : ""
+              }
+            >
+              {typeof summary?.mom_growth_rate === "number"
+                ? `${summary.mom_growth_rate.toFixed(2)}%`
+                : "-"}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-gray-600">床日同比增长</div>
+            <div
+              className={
+                typeof summary?.bed_day_growth_rate === "number"
+                  ? summary.bed_day_growth_rate >= 0
+                    ? "text-green-600"
+                    : "text-red-600"
+                  : ""
+              }
+            >
+              {typeof summary?.bed_day_growth_rate === "number"
+                ? `${summary.bed_day_growth_rate.toFixed(2)}%`
+                : "-"}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-gray-600">床日环比增长</div>
+            <div
+              className={
+                typeof summary?.bed_day_mom_growth_rate === "number"
+                  ? summary.bed_day_mom_growth_rate >= 0
+                    ? "text-green-600"
+                    : "text-red-600"
+                  : ""
+              }
+            >
+              {typeof summary?.bed_day_mom_growth_rate === "number"
+                ? `${summary.bed_day_mom_growth_rate.toFixed(2)}%`
+                : "-"}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 数据详情 + 趋势分析 */}
+      <section className="p-4 border rounded-lg bg-white">
+        <div className="flex items-center justify-between mb-3">
+          <div className="inline-flex rounded-lg overflow-hidden border">
+            <button
+              type="button"
+              onClick={() => setAndSyncView("details")}
+              className={`px-3 py-1 text-sm ${
+                viewMode === "details"
+                  ? "bg-blue-600 text-white"
+                  : "bg-white text-gray-700"
+              }`}
+            >
+              数据详情
             </button>
             <button
               type="button"
-              onClick={onReset}
-              disabled={loading}
-              className="px-4 py-2 rounded border bg-white disabled:opacity-60"
+              onClick={() => setAndSyncView("chart")}
+              className={`px-3 py-1 text-sm ${
+                viewMode === "chart"
+                  ? "bg-blue-600 text-white"
+                  : "bg-white text-gray-700"
+              }`}
             >
-              重置
+              趋势分析
             </button>
           </div>
-        </form>
-      </section>
 
-      {/* 数据详情表单（明细表格） */}
-      <section className="p-4 border rounded-lg bg-white">
-        <h2 className="text-lg font-semibold mb-3">数据详情</h2>
-        <div className="overflow-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b bg-gray-50 text-gray-700">
-                <th className="text-left p-2">日期</th>
-                <th className="text-left p-2">科室</th>
-                <th className="text-left p-2">医生</th>
-                <th className="text-right p-2">收入</th>
-                <th className="text-right p-2">收入增长率</th>
-                <th className="text-left p-2">收入与工作量趋势</th>
-              </tr>
-            </thead>
-            <tbody className="text-gray-900">
-              {pagedRows.length === 0 ? (
-                <tr>
-                  <td className="py-4 px-4 text-gray-400" colSpan={6}>
-                    暂无数据
-                  </td>
-                </tr>
-              ) : (
-                pagedRows.map((r, idx) => (
-                  <tr key={idx} className="border-t border-gray-100 hover:bg-gray-50">
-                    <td className="py-2 px-4">{r.date}</td>
-                    <td className="py-2 px-4">{r.department_name || r.department_code || "—"}</td>
-                    <td className="py-2 px-4">—</td>
-                    <td className="py-2 px-4 text-right">
-                      {typeof r.revenue === "number" ? r.revenue.toLocaleString() : "-"}
-                    </td>
-                    <td className="py-2 px-4 text-right">
-                      {r.revenue_growth_pct == null
-                        ? "-"
-                        : `${Number(r.revenue_growth_pct).toFixed(2)}%`}
-                    </td>
-                    <td className="py-2 px-4">{r.trend ?? "-"}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+          {viewMode === "chart" && (
+            <div className="inline-flex rounded-lg overflow-hidden border text-sm">
+              <button
+                type="button"
+                onClick={() => setCompare("yoy")}
+                className={`px-3 py-1 ${
+                  compare === "yoy"
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-gray-700"
+                }`}
+              >
+                同比
+              </button>
+              <button
+                type="button"
+                onClick={() => setCompare("mom")}
+                className={`px-3 py-1 ${
+                  compare === "mom"
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-gray-700"
+                }`}
+              >
+                环比
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* 分页器 */}
-        <div className="flex items-center gap-3 mt-3">
-          <button
-            className="px-3 py-1 border rounded disabled:opacity-50"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            上一页
-          </button>
-          <span className="text-sm text-gray-600">
-            第 {page} / {pageCount} 页（共 {totalRows} 条）
-          </span>
-          <button
-            className="px-3 py-1 border rounded disabled:opacity-50"
-            disabled={page >= pageCount}
-            onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-          >
-            下一页
-          </button>
+        {/* 数据详情 */}
+        <div className={viewMode === "chart" ? "hidden" : ""}>
+          <div className="overflow-auto rounded border">
+            <table className="min-w-full text-sm text-gray-900 text-left">
+              <thead>
+                <tr className="bg-gray-50 border-b text-gray-700">
+                  <th className="px-3 py-2 whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => handleSort("date")}
+                      className="flex items-center gap-1"
+                    >
+                      <span>日期</span>
+                      {renderSortIcon("date")}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => handleSort("department")}
+                      className="flex items-center gap-1"
+                    >
+                      <span>科室</span>
+                      {renderSortIcon("department")}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => handleSort("doctor")}
+                      className="flex items-center gap-1"
+                    >
+                      <span>医生</span>
+                      {renderSortIcon("doctor")}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => handleSort("revenue")}
+                      className="flex items-center gap-1"
+                    >
+                      <span>收入</span>
+                      {renderSortIcon("revenue")}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => handleSort("revenue_yoy")}
+                      className="flex items-center gap-1"
+                    >
+                      <span>收入同比增长率</span>
+                      {renderSortIcon("revenue_yoy")}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => handleSort("revenue_mom")}
+                      className="flex items-center gap-1"
+                    >
+                      <span>收入环比增长率</span>
+                      {renderSortIcon("revenue_mom")}
+                    </button>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-gray-400 py-4 text-center">
+                      暂无数据
+                    </td>
+                  </tr>
+                ) : (
+                  sortedRows.map((r, idx) => (
+                    <tr
+                      key={idx}
+                      className="border-t hover:bg-gray-50 cursor-default"
+                    >
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {formatDate(r.date)}
+                      </td>
+                      <td
+                        className="px-3 py-2 truncate"
+                        title={r.department_name || r.department_code || "—"}
+                      >
+                        {r.department_name || r.department_code || "—"}
+                      </td>
+                      <td
+                        className="px-3 py-2 truncate"
+                        title={
+                          (r as any).doctor_name ||
+                          (r as any).doctor_id ||
+                          "—"
+                        }
+                      >
+                        {(r as any).doctor_name ||
+                          (r as any).doctor_id ||
+                          "—"}
+                      </td>
+                      <td className="px-3 py-2 font-mono whitespace-nowrap">
+                        {typeof r.revenue === "number"
+                          ? r.revenue.toLocaleString()
+                          : "-"}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {r.revenue_growth_pct == null ? (
+                          "-"
+                        ) : (
+                          <span
+                            className={
+                              Number(r.revenue_growth_pct) >= 0
+                                ? "text-green-600"
+                                : "text-red-600"
+                            }
+                          >
+                            {Number(r.revenue_growth_pct).toFixed(2)}%
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {(() => {
+                          const raw =
+                            (r as any).revenue_mom_growth_pct ??
+                            (r as any).mom_growth_pct ??
+                            (r as any).mom_growth_rate ??
+                            (r as any)["收入环比增长率"] ??
+                            null;
+                          if (raw == null) return "-";
+                          const n =
+                            typeof raw === "number"
+                              ? raw
+                              : Number(
+                                  String(raw).replace(/[\s,%]/g, "")
+                                );
+                          if (!Number.isFinite(n)) return "-";
+                          return (
+                            <span
+                              className={
+                                n >= 0 ? "text-green-600" : "text-red-600"
+                              }
+                            >
+                              {n.toFixed(2)}%
+                            </span>
+                          );
+                        })()}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-3">
+            <Pagination
+              page={page}
+              pageSize={rowsPerPage}
+              total={total}
+              disabled={loading}
+              onChange={async (next) => {
+                setPage(next);
+                await fetchDetails(
+                  startDate,
+                  endDate,
+                  selectedDeps.length ? selectedDeps : null,
+                  next
+                );
+              }}
+            />
+          </div>
+
+          <p className="text-xs text-gray-500 mt-2 text-left">
+            提示：点击表头可以按该列排序（再次点击切换升序/降序）；日期按时间先后排序。
+          </p>
+        </div>
+
+        {/* 趋势分析：收入 + 床日 的同比/环比增长率 */}
+        <div className={viewMode === "details" ? "hidden" : ""}>
+          {tsRows.length === 0 ? (
+            <div className="text-gray-400 text-sm">暂无趋势数据</div>
+          ) : (
+            <div className="border rounded-lg p-3 bg-white">
+              <div className="mb-3 font-semibold text-sm">
+                趋势折线图（收入 &amp; 床日增长率）
+              </div>
+              <LineChart
+                rows={tsRows.map((r) => ({
+                  date: r.date,
+                  yoy_pct: r.yoy_pct ?? null,
+                  mom_pct: r.mom_pct ?? null,
+                  bed_yoy_pct:
+                    (r as any).bed_yoy_pct != null
+                      ? (r as any).bed_yoy_pct
+                      : null,
+                  bed_mom_pct:
+                    (r as any).bed_mom_pct != null
+                      ? (r as any).bed_mom_pct
+                      : null,
+                }))}
+                compare={compare}
+                onToggleCompare={setCompare}
+              />
+              <p className="text-xs text-gray-500 mt-2 text-left">
+                注：蓝色折线表示收入增长率，绿色折线表示床日增长率。
+                “同比” = 去年同期同日；“环比” = 同长度上一周期对应日期。
+              </p>
+            </div>
+          )}
         </div>
       </section>
     </div>
