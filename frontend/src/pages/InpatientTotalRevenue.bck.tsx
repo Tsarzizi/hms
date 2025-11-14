@@ -1,12 +1,12 @@
-// src/pages/InpatientTotalRevenue.tsx
+// src/pages/Page.tsx
 import { useEffect, useState } from "react";
-import type { CompareKind } from "../components/LineChart";
+import type { CompareKind } from "../components/base/LineChart";
 
 import ErrorAlert from "../components/ErrorAlert";
-import InpatientFilterBar from "../components/FilterBar";
-import InpatientSummaryCards from "../components/SummaryCards";
+import InpatientFilterBar from "../components/base/FilterBar";
+import InpatientSummaryCards from "../features/inpatientTotalRevenue/components/SummaryCards";
 
-import InpatientDetailsTable from "../components/DetailsTable";
+import InpatientDetailsTable from "../features/inpatientTotalRevenue/components/DetailsTable";
 import InpatientTrendSection from "../components/base/TrendSection";
 import InpatientToolbar from "../components/base/Toolbar";
 

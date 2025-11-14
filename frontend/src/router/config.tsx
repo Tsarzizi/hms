@@ -5,7 +5,7 @@ import Home from "../pages/home/page";
 import Dashboard from "../pages/dashboard/page";
 // import OutpatientVisits from "../pages/OutpatientVisits";
 // import OutpatientAppointment from "../pages/OutpatientAppointment";
-import InpatientTotalRevenue from '../pages/InpatientTotalRevenue'
+import Page from '../features/inpatientTotalRevenue/page'
 
 
 const routes: RouteObject[] = [
@@ -27,7 +27,7 @@ const routes: RouteObject[] = [
   // },
   {
     path: "/inpatient-total-revenue",
-    element: <InpatientTotalRevenue />,
+    element: <Page />,
   },
   {
     path: "*",

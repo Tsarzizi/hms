@@ -1,10 +1,12 @@
 import logging
 from datetime import date, timedelta
 from flask import Blueprint, jsonify, request
-from ..services.inpatient_total_revenue_service import (get_revenue_summary,
-                                                        get_departments,
-                                                        get_revenue_details, \
-                                                        get_revenue_timeseries)
+from ..services.inpatient_total_revenue_service import (
+    get_revenue_summary,
+    get_revenue_details,
+    get_revenue_timeseries,
+    get_dep_doc_map,  # ⭐ 新增
+)
 from ..utils.inpatient_total_revenue_validators import require_params, parse_date_generic
 from ..utils.cache import cache_get, cache_set
 
@@ -53,7 +55,8 @@ def _parse_include() -> set:
         body = request.get_json(silent=True) or {}
         include = body.get("include")
     if not include:
-        return {"departments", "data"}
+        # ⭐ 默认只取科室-医生映射
+        return {"dep_doc_map"}
     return {s.strip().lower() for s in str(include).split(",") if s.strip()}
 
 
@@ -74,32 +77,28 @@ def _parse_departments(payload):
     return out or None
 
 
-@bp.route("/init", methods=["GET", "POST"])
+@bp.route("/init", methods=["GET"])
 def init():
     try:
         include = _parse_include()
         today = date.today()
-        tomorrow = today + timedelta(days=1)
         logger.info("INIT(today) include=%s", ",".join(sorted(include)))
 
         resp = {"success": True, "date": today.isoformat()}
 
-        if "departments" in include:
-            cache_key = "departments:latest"
-            deps = cache_get(cache_key)
-            if deps is None:
-                deps = get_departments()
-                cache_set(cache_key, deps, ttl_seconds=1800)
-            resp["departments"] = deps
-
-        if "data" in include:
-            svc = get_revenue_summary(today, tomorrow, None)
-            resp["summary"] = _to_std_summary(svc)
+        # ⭐ 只处理科室-医生映射
+        if "dep_doc_map" in include:
+            # 有需要也可以加缓存，这里先直接查
+            dep_doc_map = get_dep_doc_map()
+            resp["dep_doc_map"] = dep_doc_map
 
         return jsonify(resp), 200
+
     except Exception as e:
         logger.exception("Error in /init(today): %s", e)
-        return jsonify({"success": False, "code": "INIT_FAILED", "error": str(e)}), 500
+        return jsonify(
+            {"success": False, "code": "INIT_FAILED", "error": str(e)}
+        ), 500
 
 
 @bp.route("/summary", methods=["POST", "GET"])
@@ -150,7 +149,7 @@ def summary():
         return jsonify({"success": False, "code": "SERVER_ERROR", "error": str(e)}), 500
 
 
-@bp.route("/details", methods=["POST", "GET"])
+@bp.route("/details", methods=["POST"])
 def details():
     """
     明细接口：后端不分页，返回全部行，前端自行分页

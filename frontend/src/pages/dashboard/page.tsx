@@ -5,17 +5,17 @@ import DataCard from '../../components/base/DataCard';
 
 // import OutpatientVisits from '../../../medical-services/outpatient-emergency/outpatient-visits';
 // import OutpatientAppointment from '../../../medical-services/outpatient-emergency/outpatient-appointment';
-// // import OutpatientVisits from '../OutpatientVisits';
-// // import OutpatientAppointment from '../OutpatientAppointment';
-// import TcmService from '../../../medical-services/outpatient-emergency/tcm-service.tsx';
-// import FollowUpService from '../../../medical-services/outpatient-emergency/follow-up.tsx';
-// import SpecialClinic from '../../../medical-services/outpatient-emergency/special-clinic.tsx';
-// import PrescriptionManagement from '../../../medical-services/outpatient-emergency/prescription-management.tsx';
+import OutpatientVisits from '../outpatient-visits';
+import OutpatientAppointment from '../outpatient-appointment';
+import TcmService from '../tcm-service.tsx';
+import FollowUpService from '../follow-up.tsx';
+import SpecialClinic from '../special-clinic.tsx';
+import PrescriptionManagement from '../prescription-management.tsx';
 
-// import AdmissionDischarge from '../../../medical-services/inpatient-service/admission-discharge.tsx';
-// import AdmissionPathway from '../../../medical-services/inpatient-service/admission-pathway.tsx';
-// import EmergencyAdmission from '../../../medical-services/inpatient-service/emergency-admission.tsx';
-// import DiseaseComposition from '../../../medical-services/inpatient-service/disease-composition.tsx';
+import AdmissionDischarge from '../admission-discharge.tsx';
+import AdmissionPathway from '../admission-pathway.tsx';
+import EmergencyAdmission from '../emergency-admission.tsx';
+import DiseaseComposition from '../disease-composition.tsx';
 
 // import TransferPatients from '../../../medical-services/referral/transfer-service.tsx';
 // import ReferralDiseaseRanking from '../../../medical-services/referral/disease-ranking.tsx';
@@ -72,22 +72,22 @@ import DataCard from '../../components/base/DataCard';
 // import AccountsReceivable from '../../../financial-management/accounts-receivable.tsx';
 // import AssetAnalysis from '../../../financial-management/asset-analysis.tsx';
 
-// import OutpatientAvgCost from '../../../medical-burden/outpatient-cost/outpatient-avg-cost';
-// import OutpatientCostAnalysis from '../../../medical-burden/outpatient-cost/outpatient-cost-analysis.tsx';
+import OutpatientAvgCost from '../outpatient-avg-cost';
+import OutpatientCostAnalysis from '../outpatient-cost-analysis.tsx';
 
-// import OutpatientAvgDrugCost from '../../../medical-burden/outpatient-drug-cost/outpatient-avg-drug-cost.tsx';
-// import OutpatientDrugCostAnalysis from '../../../medical-burden/outpatient-drug-cost/outpatient-drug-cost-analysis.tsx';
+import OutpatientAvgDrugCost from '../outpatient-avg-drug-cost.tsx';
+import OutpatientDrugCostAnalysis from '../outpatient-drug-cost-analysis.tsx';
 
-// import InpatientCostOverall from '../../../medical-burden/inpatient-cost/inpatient-cost-overall.tsx';
-// import InpatientAverageCostRatio from '../../../medical-burden/inpatient-cost/inpatient-avg-cost-ratio.tsx';
-// import AverageBedDayCost from '../../../medical-burden/inpatient-cost/avg-bed-day-cost.tsx';
+import InpatientCostOverall from '../inpatient-cost-overall.tsx';
+import InpatientAverageCostRatio from '../inpatient-avg-cost-ratio.tsx';
+import AverageBedDayCost from '../avg-bed-day-cost.tsx';
 
-// import OutpatientInsuranceOverall from '../../../medical-insurance/outpatient-insurance/outpatient-insurance-overall.tsx';
-// import InsurancePatientTotalCost from '../../../medical-insurance/outpatient-insurance/insurance-patient-total-cost.tsx';
-// import InsurancePatientVisits from '../../../medical-insurance/outpatient-insurance/insurance-patient-visits.tsx';
-// import InsurancePatientCost from '../../../medical-insurance/outpatient-insurance/insurance-patient-cost.tsx';
+import OutpatientInsuranceOverall from '../outpatient-insurance-overall.tsx';
+import InsurancePatientTotalCost from '../insurance-patient-total-cost.tsx';
+import InsurancePatientVisits from '../insurance-patient-visits.tsx';
+import InsurancePatientCost from '../insurance-patient-cost.tsx';
 
-// import InpatientInsurancePatients from '../../../medical-insurance/inpatient-insurance/inpatient-insurance-patients.tsx';
+import InpatientInsurancePatients from '../inpatient-insurance-patients.tsx';
 
 // import StaffStructure from '../../../medical-resources/medical-staff/staff-structure.tsx';
 // import StaffTotalCount from '../../../medical-resources/medical-staff/staff-total-count.tsx';
@@ -116,17 +116,18 @@ import DataCard from '../../components/base/DataCard';
 
 // import PhysicianEfficiency from '../../../medical-efficiency/doctor-efficiency/physician-efficiency.tsx';
 
-// import TotalRevenue from '../../../hospital-revenue/outpatient-revenue/total-revenue.tsx';
-// import RevenueRatio from '../../../hospital-revenue/outpatient-revenue/revenue-ratio.tsx';
-// import RevenueStructure from '../../../hospital-revenue/outpatient-revenue/revenue-structure.tsx';
-// import RevenueGrowthRate from '../../../hospital-revenue/outpatient-revenue/revenue-growth.tsx';
-// import AverageRevenue from '../../../hospital-revenue/outpatient-revenue/average-revenue.tsx';
+import TotalRevenue from '../total-revenue.tsx';
+import RevenueRatio from '../revenue-ratio.tsx';
+import RevenueStructure from '../revenue-structure.tsx';
+import RevenueGrowthRate from '../revenue-growth.tsx';
+import AverageRevenue from '../average-revenue.tsx';
 
 // import TotalInpatientRevenue from '../../../hospital-revenue/inpatient-revenue/inpatient-total-revenue.tsx';
 import InpatientTotalRevenue from '../InpatientTotalRevenue';
-
-// import InpatientRevenueRanking from '../../../hospital-revenue/inpatient-revenue/inpatient-revenue-ranking.tsx';
-// import InpatientRevenueClassification from '../../../hospital-revenue/inpatient-revenue/inpatient-revenue-classification.tsx';
+import DoctorWorkloadPerformance from '../doctor-workload-performance';
+import DepartmentWorkloadPerformance from '../department-workload-performance';
+import InpatientRevenueRanking from '../inpatient-revenue-ranking.tsx';
+import InpatientRevenueClassification from '../inpatient-revenue-classification.tsx';
 
 // import PhysicalExaminationRevenue from '../../../hospital-revenue/physical-exam-revenue/physical-exam-average-revenue.tsx';
 // import PhysicalExaminationAverageRevenue from '../../../hospital-revenue/physical-exam-revenue/physical-exam-average-revenue.tsx';
@@ -143,6 +144,26 @@ interface MenuItem {
 }
 
 const menuItems: MenuItem[] = [
+  // 将工作量与绩效放在第一个位置
+  {
+    id: 'workload_performance',
+    title: '工作量与绩效',
+    icon: 'ri-bar-chart-line',
+    children: [
+      {
+        id: 'doctor_workload_performance',
+        title: '医生工作量与绩效',
+        icon: 'ri-user-star-line',
+        children: []
+      },
+      {
+        id: 'department_workload_performance',
+        title: '科室工作量与绩效',
+        icon: 'ri-building-line',
+        children: []
+      }
+    ]
+  },
   {
     id: 'medical-services',
     title: '医疗服务',
@@ -188,6 +209,107 @@ const menuItems: MenuItem[] = [
         icon: 'ri-stethoscope-line',
         children: [
           { id: 'physical-exam-visits', title: '体检人次', icon: 'ri-user-heart-line', children: [] }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'hospital-revenue',
+    title: '医院收入情况',
+    icon: 'ri-money-dollar-circle-line',
+    children: [
+      {
+        id: 'outpatient-revenue',
+        title: '门急诊收入',
+        icon: 'ri-coins-line',
+        children: [
+          { id: 'total-revenue', title: '总收入', icon: 'ri-money-dollar-circle-line', children: [] },
+          { id: 'revenue-ratio', title: '收入占比', icon: 'ri-pie-chart-line', children: [] },
+          { id: 'revenue-structure', title: '收入结构', icon: 'ri-bar-chart-grouped-line', children: [] },
+          { id: 'revenue-growth', title: '收入增长率', icon: 'ri-line-chart-line', children: [] },
+          { id: 'average-revenue', title: '次均收入', icon: 'ri-calculator-line', children: [] }
+        ]
+      },
+      {
+        id: 'inpatient-revenue',
+        title: '住院收入',
+        icon: 'ri-bank-card-line',
+        children: [
+          { id: 'inpatient-total-revenue', title: '总收入', icon: 'ri-money-dollar-circle-line', children: [] },
+          { id: 'inpatient-revenue-ranking', title: '收入顺位', icon: 'ri-trophy-line', children: [] },
+          { id: 'inpatient-revenue-classification', title: '收入分类', icon: 'ri-pie-chart-2-line', children: [] }
+        ]
+      },
+      {
+        id: 'physical-exam-revenue',
+        title: '体检收入',
+        icon: 'ri-wallet-3-line',
+        children: [
+          { id: 'physical-exam-total-revenue', title: '总收入', icon: 'ri-money-dollar-circle-line', children: [] },
+          { id: 'physical-exam-average-revenue', title: '均次收入', icon: 'ri-calculator-line', children: [] },
+          { id: 'physical-exam-revenue-ratio', title: '收入占比', icon: 'ri-pie-chart-line', children: [] },
+          { id: 'physical-exam-revenue-growth', title: '收入增长率', icon: 'ri-line-chart-line', children: [] }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'medical-burden',
+    title: '医疗负担',
+    icon: 'ri-funds-line',
+    children: [
+      {
+        id: 'outpatient-cost',
+        title: '门急诊次均费用',
+        icon: 'ri-price-tag-3-line',
+        children: [
+          { id: 'outpatient-avg-cost', title: '门急诊次均费用', icon: 'ri-calculator-line', children: [] },
+          { id: 'outpatient-cost-analysis', title: '门急诊次均费用分析', icon: 'ri-bar-chart-line', children: [] }
+        ]
+      },
+      {
+        id: 'outpatient-drug-cost',
+        title: '门急诊药费情况',
+        icon: 'ri-medicine-bottle-line',
+        children: [
+          { id: 'outpatient-avg-drug-cost', title: '门急诊次均药费', icon: 'ri-calculator-line', children: [] },
+          { id: 'outpatient-drug-cost-analysis', title: '门急诊次均药费分析', icon: 'ri-bar-chart-line', children: [] }
+        ]
+      },
+      {
+        id: 'inpatient-cost',
+        title: '住院医疗费用',
+        icon: 'ri-bill-line',
+        children: [
+          { id: 'inpatient-cost-overall', title: '总体分析', icon: 'ri-dashboard-line', children: [] },
+          { id: 'inpatient-avg-cost-ratio', title: '住院次均费用占比', icon: 'ri-pie-chart-line', children: [] },
+          { id: 'avg-bed-day-cost', title: '平均床日费用', icon: 'ri-hotel-bed-line', children: [] }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'medical-insurance',
+    title: '医疗保障',
+    icon: 'ri-shield-user-line',
+    children: [
+      {
+        id: 'outpatient-insurance',
+        title: '门急诊医疗保障',
+        icon: 'ri-shield-check-line',
+        children: [
+          { id: 'outpatient-insurance-overall', title: '总体分析', icon: 'ri-dashboard-line', children: [] },
+          { id: 'insurance-patient-total-cost', title: '医保患者总费用', icon: 'ri-money-dollar-circle-line', children: [] },
+          { id: 'insurance-patient-visits', title: '医保患者就诊情况', icon: 'ri-user-line', children: [] },
+          { id: 'insurance-patient-cost', title: '医保患者费用', icon: 'ri-price-tag-3-line', children: [] }
+        ]
+      },
+      {
+        id: 'inpatient-insurance',
+        title: '住院医疗保障',
+        icon: 'ri-shield-star-line',
+        children: [
+          { id: 'inpatient-insurance-patients', title: '医保住院患者情况', icon: 'ri-hotel-bed-line', children: [] }
         ]
       }
     ]
@@ -367,46 +489,6 @@ const menuItems: MenuItem[] = [
     ]
   },
   {
-    id: 'hospital-revenue',
-    title: '医院收入情况',
-    icon: 'ri-money-dollar-circle-line',
-    children: [
-      {
-        id: 'outpatient-revenue',
-        title: '门急诊收入',
-        icon: 'ri-coins-line',
-        children: [
-          { id: 'total-revenue', title: '总收入', icon: 'ri-money-dollar-circle-line', children: [] },
-          { id: 'revenue-ratio', title: '收入占比', icon: 'ri-pie-chart-line', children: [] },
-          { id: 'revenue-structure', title: '收入结构', icon: 'ri-bar-chart-grouped-line', children: [] },
-          { id: 'revenue-growth', title: '收入增长率', icon: 'ri-line-chart-line', children: [] },
-          { id: 'average-revenue', title: '次均收入', icon: 'ri-calculator-line', children: [] }
-        ]
-      },
-      {
-        id: 'inpatient-revenue',
-        title: '住院收入',
-        icon: 'ri-bank-card-line',
-        children: [
-          { id: 'inpatient-total-revenue', title: '总收入', icon: 'ri-money-dollar-circle-line', children: [] },
-          { id: 'inpatient-revenue-ranking', title: '收入顺位', icon: 'ri-trophy-line', children: [] },
-          { id: 'inpatient-revenue-classification', title: '收入分类', icon: 'ri-pie-chart-2-line', children: [] }
-        ]
-      },
-      {
-        id: 'physical-exam-revenue',
-        title: '体检收入',
-        icon: 'ri-wallet-3-line',
-        children: [
-          { id: 'physical-exam-total-revenue', title: '总收入', icon: 'ri-money-dollar-circle-line', children: [] },
-          { id: 'physical-exam-average-revenue', title: '均次收入', icon: 'ri-calculator-line', children: [] },
-          { id: 'physical-exam-revenue-ratio', title: '收入占比', icon: 'ri-pie-chart-line', children: [] },
-          { id: 'physical-exam-revenue-growth', title: '收入增长率', icon: 'ri-line-chart-line', children: [] }
-        ]
-      }
-    ]
-  },
-  {
     id: 'financial-management',
     title: '财务管理',
     icon: 'ri-calculator-line',
@@ -414,67 +496,6 @@ const menuItems: MenuItem[] = [
       { id: 'income-expense-analysis', title: '收入支出结余分析', icon: 'ri-line-chart-line', children: [] },
       { id: 'accounts-receivable', title: '应收账款', icon: 'ri-wallet-line', children: [] },
       { id: 'asset-analysis', title: '资产分析', icon: 'ri-building-line', children: [] }
-    ]
-  },
-  {
-    id: 'medical-burden',
-    title: '医疗负担',
-    icon: 'ri-funds-line',
-    children: [
-      {
-        id: 'outpatient-cost',
-        title: '门急诊次均费用',
-        icon: 'ri-price-tag-3-line',
-        children: [
-          { id: 'outpatient-avg-cost', title: '门急诊次均费用', icon: 'ri-calculator-line', children: [] },
-          { id: 'outpatient-cost-analysis', title: '门急诊次均费用分析', icon: 'ri-bar-chart-line', children: [] }
-        ]
-      },
-      {
-        id: 'outpatient-drug-cost',
-        title: '门急诊药费情况',
-        icon: 'ri-medicine-bottle-line',
-        children: [
-          { id: 'outpatient-avg-drug-cost', title: '门急诊次均药费', icon: 'ri-calculator-line', children: [] },
-          { id: 'outpatient-drug-cost-analysis', title: '门急诊次均药费分析', icon: 'ri-bar-chart-line', children: [] }
-        ]
-      },
-      {
-        id: 'inpatient-cost',
-        title: '住院医疗费用',
-        icon: 'ri-bill-line',
-        children: [
-          { id: 'inpatient-cost-overall', title: '总体分析', icon: 'ri-dashboard-line', children: [] },
-          { id: 'inpatient-avg-cost-ratio', title: '住院次均费用占比', icon: 'ri-pie-chart-line', children: [] },
-          { id: 'avg-bed-day-cost', title: '平均床日费用', icon: 'ri-hotel-bed-line', children: [] }
-        ]
-      }
-    ]
-  },
-  {
-    id: 'medical-insurance',
-    title: '医疗保障',
-    icon: 'ri-shield-user-line',
-    children: [
-      {
-        id: 'outpatient-insurance',
-        title: '门急诊医疗保障',
-        icon: 'ri-shield-check-line',
-        children: [
-          { id: 'outpatient-insurance-overall', title: '总体分析', icon: 'ri-dashboard-line', children: [] },
-          { id: 'insurance-patient-total-cost', title: '医保患者总费用', icon: 'ri-money-dollar-circle-line', children: [] },
-          { id: 'insurance-patient-visits', title: '医保患者就诊情况', icon: 'ri-user-line', children: [] },
-          { id: 'insurance-patient-cost', title: '医保患者费用', icon: 'ri-price-tag-3-line', children: [] }
-        ]
-      },
-      {
-        id: 'inpatient-insurance',
-        title: '住院医疗保障',
-        icon: 'ri-shield-star-line',
-        children: [
-          { id: 'inpatient-insurance-patients', title: '医保住院患者情况', icon: 'ri-hotel-bed-line', children: [] }
-        ]
-      }
     ]
   },
   {
@@ -527,7 +548,7 @@ const menuItems: MenuItem[] = [
 
 export default function Dashboard() {
   const location = useLocation();
-  const [activeMenu, setActiveMenu] = useState('medical-services');
+  const [activeMenu, setActiveMenu] = useState('workload_performance'); // 默认激活工作量与绩效
 
   // 根据URL参数设置默认激活的菜单
   useEffect(() => {
@@ -537,16 +558,17 @@ export default function Dashboard() {
     if (moduleParam) {
       // 根据模块参数设置对应的菜单项
       const moduleMapping: { [key: string]: string } = {
+        'workload_performance': 'doctor_workload_performance',
         'medical-services': 'outpatient-visits',
-        'medical-quality': 'adverse-events-count',
-        'medical-efficiency': 'bed-usage-analysis',
         'hospital-revenue': 'total-revenue',
         'medical-burden': 'outpatient-avg-cost',
+        'medical-insurance': 'outpatient-insurance-overall',
+        'medical-quality': 'adverse-events-count',
+        'medical-efficiency': 'bed-usage-analysis',
         'medical-resources': 'staff-total-count',
         'medication-management': 'hospital-medicine',
         'blood-management': 'blood-product-count',
-        'financial-management': 'income-expense-analysis',
-        'medical-insurance': 'outpatient-insurance-overall'
+        'financial-management': 'income-expense-analysis'
       };
 
       const targetMenu = moduleMapping[moduleParam] || moduleParam;
@@ -569,32 +591,38 @@ export default function Dashboard() {
       return null;
     };
 
-    return findTitle(menuItems, menuId) || '医疗服务';
+    return findTitle(menuItems, menuId) || '工作量与绩效';
   };
 
 const renderContent = () => {
   // 根据选中的菜单渲染对应内容
   switch (activeMenu) {
-    // case 'outpatient-visits':
-    //   return <OutpatientVisits />;
-    // case 'outpatient-appointment':
-    //   return <OutpatientAppointment />;
-    // case 'tcm-service':
-    //   return <TcmService />;
-    // case 'follow-up':
-    //   return <FollowUpService />;
-    // case 'special-clinic':
-    //   return <SpecialClinic />;
-    // case 'prescription-management':
-    //   return <PrescriptionManagement />;
-    // case 'admission-discharge':
-    //   return <AdmissionDischarge />;
-    // case 'admission-pathway':
-    //   return <AdmissionPathway />;
-    // case 'emergency-admission':
-    //   return <EmergencyAdmission />;
-    // case 'disease-composition':
-    //   return <DiseaseComposition />;
+    case 'inpatient-total-revenue':
+      return <InpatientTotalRevenue />;
+    case 'doctor_workload_performance':
+      return <DoctorWorkloadPerformance />;
+    case 'department_workload_performance':
+      return <DepartmentWorkloadPerformance />;
+    case 'outpatient-visits':
+      return <OutpatientVisits />;
+    case 'outpatient-appointment':
+      return <OutpatientAppointment />;
+    case 'tcm-service':
+      return <TcmService />;
+    case 'follow-up':
+      return <FollowUpService />;
+    case 'special-clinic':
+      return <SpecialClinic />;
+    case 'prescription-management':
+      return <PrescriptionManagement />;
+    case 'admission-discharge':
+      return <AdmissionDischarge />;
+    case 'admission-pathway':
+      return <AdmissionPathway />;
+    case 'emergency-admission':
+      return <EmergencyAdmission />;
+    case 'disease-composition':
+      return <DiseaseComposition />;
     // case 'transfer-service': // 这是正确的转诊人次
     //   return <TransferPatients />;
     // case 'disease-ranking':
@@ -603,25 +631,23 @@ const renderContent = () => {
     //   return <DepartmentTransferStatistics />;
     // case 'physical-exam-visits':
     //   return <HealthExamination />;
-    // case 'total-revenue':
-    //   return <TotalRevenue />;
-    // case 'revenue-ratio':
-    //   return <RevenueRatio />;
-    // case 'revenue-structure':
-    //   return <RevenueStructure />;
-    // case 'revenue-growth':
-    //   return <RevenueGrowthRate />;
-    // case 'revenue-growth-rate':
-    //   return <RevenueGrowthRate />;
-    // case 'average-revenue':
-    //   return <AverageRevenue />;
-    case 'inpatient-total-revenue':
-      return <InpatientTotalRevenue />;
-    // case 'inpatient-revenue-ranking':
-    //   return <InpatientRevenueRanking />;
-    // case 'inpatient-revenue-classification':
-    //   return <InpatientRevenueClassification />;
-    // case 'physical-exam-total-revenue':
+    case 'total-revenue':
+      return <TotalRevenue />;
+    case 'revenue-ratio':
+      return <RevenueRatio />;
+    case 'revenue-structure':
+      return <RevenueStructure />;
+    case 'revenue-growth':
+      return <RevenueGrowthRate />;
+    case 'revenue-growth-rate':
+      return <RevenueGrowthRate />;
+    case 'average-revenue':
+      return <AverageRevenue />;
+    case 'inpatient-revenue-ranking':
+      return <InpatientRevenueRanking />;
+    case 'inpatient-revenue-classification':
+      return <InpatientRevenueClassification />;
+    case 'physical-exam-total-revenue':
     //   return <PhysicalExaminationRevenue />;
     // case 'physical-exam-average-revenue':
     //   return <PhysicalExaminationAverageRevenue />;
@@ -686,7 +712,7 @@ const renderContent = () => {
     // // 单病种效率
     // case 'single-disease-efficiency':
     //   return <SingleDiseaseEfficiency />;
-
+    //
     // case 'infection-count-analysis':
     //   return <InfectionCountAnalysis />;
     // case 'infection-rate-analysis':
@@ -697,7 +723,7 @@ const renderContent = () => {
     //   return <InfectionSiteAnalysis />;
     // case 'accident-type':
     //   return <AccidentType />
-
+    //
     // case 'emergency-mortality':
     //   return <EmergencyMortality />;
     // case 'inpatient-mortality':
@@ -716,30 +742,30 @@ const renderContent = () => {
     //   return <AccountsReceivable />;
     // case 'asset-analysis':
     //   return <AssetAnalysis />;
-    // case 'outpatient-avg-cost':
-    //   return <OutpatientAvgCost />;
-    // case 'outpatient-cost-analysis':
-    //   return <OutpatientCostAnalysis />;
-    // case 'outpatient-avg-drug-cost':
-    //   return <OutpatientAvgDrugCost />;
-    // case 'outpatient-drug-cost-analysis':
-    //   return <OutpatientDrugCostAnalysis />;
-    // case 'inpatient-cost-overall':
-    //   return <InpatientCostOverall />;
-    // case 'inpatient-avg-cost-ratio':
-    //   return <InpatientAverageCostRatio  />;
-    // case 'avg-bed-day-cost':
-    //   return <AverageBedDayCost />;
-    // case 'outpatient-insurance-overall':
-    //   return <OutpatientInsuranceOverall />;
-    // case 'insurance-patient-total-cost':
-    //   return <InsurancePatientTotalCost />;
-    // case 'insurance-patient-visits':
-    //   return <InsurancePatientVisits />;
-    // case 'insurance-patient-cost':
-    //   return <InsurancePatientCost />;
-    // case 'inpatient-insurance-patients':
-    //   return <InpatientInsurancePatients />;
+    case 'outpatient-avg-cost':
+      return <OutpatientAvgCost />;
+    case 'outpatient-cost-analysis':
+      return <OutpatientCostAnalysis />;
+    case 'outpatient-avg-drug-cost':
+      return <OutpatientAvgDrugCost />;
+    case 'outpatient-drug-cost-analysis':
+      return <OutpatientDrugCostAnalysis />;
+    case 'inpatient-cost-overall':
+      return <InpatientCostOverall />;
+    case 'inpatient-avg-cost-ratio':
+      return <InpatientAverageCostRatio  />;
+    case 'avg-bed-day-cost':
+      return <AverageBedDayCost />;
+    case 'outpatient-insurance-overall':
+      return <OutpatientInsuranceOverall />;
+    case 'insurance-patient-total-cost':
+      return <InsurancePatientTotalCost />;
+    case 'insurance-patient-visits':
+      return <InsurancePatientVisits />;
+    case 'insurance-patient-cost':
+      return <InsurancePatientCost />;
+    case 'inpatient-insurance-patients':
+      return <InpatientInsurancePatients />;
     // case 'staff-total-count':
     //   return <StaffTotalCount />;
     // case 'staff-structure':
@@ -844,4 +870,3 @@ const renderContent = () => {
     </div>
   );
 }
-

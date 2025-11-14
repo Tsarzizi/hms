@@ -1,5 +1,5 @@
 // src/components/inpatient/InpatientToolbar.tsx
-import type { CompareKind } from "../LineChart";
+import type { CompareKind } from "./LineChart";
 
 interface Props {
   viewMode: "details" | "chart";

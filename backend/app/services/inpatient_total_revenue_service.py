@@ -35,11 +35,16 @@ def _shift_one_year(d: date) -> date:
         return d - timedelta(days=365)
 
 
-def get_departments():
+def get_dep_doc_map():
     """
-    科室列表查询：委托给 Repository，保持返回结构不变。
+    科室 → 医生列表映射的服务封装。
+    目前只是简单把 Repository 的结果透出去，方便路由调用。
     """
-    return repo.get_departments()
+    try:
+        return repo.get_dep_doc_map()
+    except Exception as e:
+        logger.exception("Error fetching dep-doc map: %s", e)
+        raise
 
 
 def get_revenue_details(start, end=None, departments=None):
@@ -86,8 +91,6 @@ def get_revenue_details(start, end=None, departments=None):
     return {"rows": rows_out, "total": len(rows_out)}
 
 
-
-
 def get_revenue_timeseries(start, end, departments=None):
     """
     趋势：
@@ -127,7 +130,6 @@ def get_revenue_timeseries(start, end, departments=None):
         })
 
     return rows_out
-
 
 
 def get_revenue_summary(start_date, end_date, departments=None):

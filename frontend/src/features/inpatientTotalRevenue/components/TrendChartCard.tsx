@@ -9,8 +9,8 @@
 // 使用方式：由父组件管理 viewMode / compare / rows，
 // 本组件只负责展示和把用户操作回调给父组件。
 
-import LineChart, { CompareKind } from "./LineChart";
-import type { TSRow } from "../services/inpatientTotalRevenueApi";
+import LineChart, { CompareKind } from "../../../components/base/LineChart";
+import type { TSRow } from "../../../services/inpatientTotalRevenueApi";
 
 interface Props {
   /** 当前视图模式：数据详情 or 趋势分析 */

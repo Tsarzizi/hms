@@ -1,4 +1,3 @@
-// src/components/LineChart.tsx
 import React from "react";
 import {
   ResponsiveContainer,
@@ -42,10 +41,7 @@ const LineChart: React.FC<Props> = ({ rows, compare }) => {
   // 根据 compare 映射出统一的数据字段
   const data = rows.map((r) => ({
     date: r.date,
-    revenue:
-      compare === "yoy"
-        ? r.yoy_pct
-        : r.mom_pct,
+    revenue: compare === "yoy" ? r.yoy_pct : r.mom_pct,
     bed:
       compare === "yoy"
         ? r.bed_yoy_pct ?? null
@@ -61,20 +57,22 @@ const LineChart: React.FC<Props> = ({ rows, compare }) => {
   const bedName = compare === "yoy" ? "床日同比(%)" : "床日环比(%)";
 
   return (
-    <div style={{ width: "100%", height: 360 }}>
-      <div className="text-sm font-semibold mb-2 text-left">{title}</div>
+    <div className="w-full h-[360px]">
+      <div className="text-sm font-semibold mb-2 text-left text-gray-900">
+        {title}
+      </div>
       <ResponsiveContainer>
-        <RLineChart data={data} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+        <RLineChart
+          data={data}
+          margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+        >
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis
             dataKey="date"
             tickFormatter={formatDateLabel}
             minTickGap={16}
           />
-          <YAxis
-            tickFormatter={formatPercent}
-            domain={["auto", "auto"]}
-          />
+          <YAxis tickFormatter={formatPercent} domain={["auto", "auto"]} />
           <Tooltip
             formatter={(value: any) => formatPercent(value)}
             labelFormatter={(label: any) => String(label)}

@@ -5,7 +5,7 @@
 //   1. fetchDetailsAPI 不再传 limit / offset
 //   2. DetailsResponse 不再包含 limit/offset
 //   3. 后端 /details 只需返回 rows + total
-//   4. 其他接口保持不变
+//   4. /init 现在返回 doctors（医生+科室映射）
 // ------------------------------------------------------
 export type Trend = "同向" | "反向" | "持平/未知" | string;
 
@@ -17,6 +17,22 @@ export interface DepartmentOption {
 export interface DoctorOption {
   id: string;
   name: string;
+}
+// 科室下医生结构（来自 /doc_dep_map）
+export interface DepDoctor {
+  doc_id: string;
+  doc_name: string;
+}
+
+export interface DepDocMapRow {
+  dep_id: string;
+  dep_name: string;
+  doctors: DepDoctor[];
+}
+
+export interface DepDocMapResponse {
+  success: boolean;
+  rows: DepDocMapRow[];
 }
 
 export interface RevenueSummaryStd {
@@ -40,10 +56,22 @@ export interface DetailsRow {
   doctor_name?: string;
 }
 
+// ⭐ InitResponse：增加 doctors 字段（来自 get_doc_dep_map）
 export interface InitResponse {
   success: boolean;
   date?: string;
+
+  // 旧的科室列表字段（目前前端已从 doctors 推导，可保留以兼容）
   departments?: DepartmentOption[];
+
+  // 新：医生 + 绩效科室映射
+  doctors?: {
+    doc_id: string;
+    doc_name: string;
+    dep_id: string;
+    dep_name: string;
+  }[];
+
   summary?: RevenueSummaryStd;
 }
 
@@ -141,7 +169,7 @@ export async function apiFetch(
   }
 }
 
-// 初始化（科室 + 汇总 + 今日日期）
+// 初始化（医生+科室映射 + 汇总 + 今日日期）
 export async function fetchInitAPI(): Promise<InitResponse> {
   const res = await apiFetch(`${API_BASE}/init`);
   if (!res.ok) throw new Error(`INIT 请求失败：${res.status}`);
@@ -324,6 +352,8 @@ export function formatDate(dateStr?: string | null) {
 }
 
 // 从明细中推导出医生列表（用于前端筛选）
+// 现在主路径改为：从 /init 的 doctors 获取医生，
+// 本方法保留，便于将来需要从明细兜底推导。
 export function deriveDoctors(rows: any[]): DoctorOption[] {
   const map = new Map<string, string>();
   for (const r of rows || []) {
