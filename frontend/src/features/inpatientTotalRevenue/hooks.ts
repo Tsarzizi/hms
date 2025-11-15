@@ -1,5 +1,5 @@
 // src/features/inpatientTotalRevenue/hooks.ts
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CompareKind } from "../../components/base/LineChart";
 
 import {
@@ -36,7 +36,39 @@ export function useInpatientTotalRevenuePage() {
   const [error, setError] = useState("");
 
   const [departments, setDepartments] = useState<DepartmentOption[]>([]);
-  const [doctors, setDoctors] = useState<UIDoctorOption[]>([]);
+
+  // 全量医生列表（不受科室筛选）
+  const [allDoctors, setAllDoctors] = useState<UIDoctorOption[]>([]);
+
+  // 科室 / 医生筛选（科室影响后端查询，医生参与后端查询 + 前端过滤）
+  const [selectedDeps, setSelectedDepsRaw] = useState<string[]>([]);
+  const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
+
+  // 设置科室时，同时清理掉不属于这些科室的已选医生
+  const setSelectedDeps = useCallback(
+    (deps: string[]) => {
+      setSelectedDepsRaw(deps);
+
+      // 没选科室时，不强制清空医生（保持原有行为）
+      if (!deps.length) return;
+
+      setSelectedDocs((prev) =>
+        prev.filter((id) => {
+          const doc = allDoctors.find((d) => d.id === id);
+          return doc && deps.includes(doc.dep_code);
+        })
+      );
+    },
+    [allDoctors]
+  );
+
+  // 根据选中的科室，推导当前可选医生列表
+  const doctors = useMemo(() => {
+    // 没选科室 → 视为全部科室
+    if (!selectedDeps.length) return allDoctors;
+    return allDoctors.filter((d) => selectedDeps.includes(d.dep_code));
+  }, [allDoctors, selectedDeps]);
+
   const [summary, setSummary] = useState<SummaryViewModel | null>(null);
 
   // ✅ 明细：前端分页
@@ -87,12 +119,27 @@ export function useInpatientTotalRevenuePage() {
   const [startDate, setStartDate] = useState(todayStr);
   const [endDate, setEndDate] = useState(todayStr);
 
-  // 科室 / 医生筛选（科室影响后端查询，医生只在前端过滤）
-  const [selectedDeps, setSelectedDeps] = useState<string[]>([]);
-  const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
+  // 统一 deps 处理：
+  // 现在后端按“科室名称”筛选，
+  // 所以前端内部仍然用 code（dep_id）保存选中项，
+  // 但在发请求时要把 code 映射成 name 传给后端。
+  const getDepsOrNull = () => {
+    if (!selectedDeps.length) return null;
+    if (!departments.length) return null;
 
-  // 统一 deps 处理：没有选中科室时，传 null 给后端表示“全部科室”
-  const getDepsOrNull = () => (selectedDeps.length ? selectedDeps : null);
+    const codeToName = new Map(
+      departments.map((d) => [d.code, d.name] as [string, string])
+    );
+
+    const names = selectedDeps
+      .map((code) => codeToName.get(code))
+      .filter((name): name is string => !!name);
+
+    return names.length ? names : null;
+  };
+
+  // 统一 doctors 处理：没有选中医生时传 null
+  const getDocsOrNull = () => (selectedDocs.length ? selectedDocs : null);
 
   // ---- 核心拉数逻辑 ----
 
@@ -120,7 +167,8 @@ export function useInpatientTotalRevenuePage() {
           }))
           .filter((d) => d.id && d.name); // 简单过滤空数据
 
-        setDoctors(docList);
+        // 保存全量医生
+        setAllDoctors(docList);
 
         // 科室列表：从医生的 dep_code/dep_name 推导去重得到
         const depMap = new Map<string, string>();
@@ -148,7 +196,7 @@ export function useInpatientTotalRevenuePage() {
 
         // 全量明细 + 趋势
         await Promise.all([
-          loadDetails(today, today, null),
+          loadDetails(today, today, null, null),
           loadTimeseries(today, today, null),
         ]);
       } catch (e: any) {
@@ -183,12 +231,14 @@ export function useInpatientTotalRevenuePage() {
   async function loadDetails(
     start: string,
     end: string,
-    deps: string[] | null
+    deps: string[] | null,
+    docs: string[] | null
   ) {
     const data = await fetchDetailsAPI({
       start,
       end,
       deps,
+      doctors: docs,
     });
 
     const rows = Array.isArray(data?.rows) ? data.rows : [];
@@ -233,6 +283,7 @@ export function useInpatientTotalRevenuePage() {
     try {
       setLoading(true);
       const deps = getDepsOrNull();
+      const docs = getDocsOrNull();
 
       // 汇总
       await loadSummary(startDate, endDate, deps);
@@ -242,7 +293,7 @@ export function useInpatientTotalRevenuePage() {
 
       // 全量明细 + 趋势
       await Promise.all([
-        loadDetails(startDate, endDate, deps),
+        loadDetails(startDate, endDate, deps, docs),
         loadTimeseries(startDate, endDate, deps),
       ]);
     } catch (e: any) {
@@ -257,7 +308,7 @@ export function useInpatientTotalRevenuePage() {
     const today = getToday(0);
     setStartDate(today);
     setEndDate(today);
-    setSelectedDeps([]);
+    setSelectedDeps([]); // 使用包装后的 setSelectedDeps
     setSelectedDocs([]);
     setError("");
     setPage(1);
@@ -269,7 +320,7 @@ export function useInpatientTotalRevenuePage() {
     try {
       await loadSummary(today, today, null);
       await Promise.all([
-        loadDetails(today, today, null),
+        loadDetails(today, today, null, null),
         loadTimeseries(today, today, null),
       ]);
     } catch (e: any) {
@@ -306,7 +357,7 @@ export function useInpatientTotalRevenuePage() {
     loading,
     error,
     departments,
-    doctors,
+    doctors, // <- 已按科室过滤后的医生列表
     summary,
     rowsPerPage,
     page,
@@ -326,7 +377,7 @@ export function useInpatientTotalRevenuePage() {
     // 操作
     setStartDate,
     setEndDate,
-    setSelectedDeps,
+    setSelectedDeps, // <- 包装过的 setter
     setSelectedDocs,
     setSortKey,
     setSortDir,

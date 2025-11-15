@@ -35,57 +35,63 @@ def _shift_one_year(d: date) -> date:
         return d - timedelta(days=365)
 
 
-def get_dep_doc_map():
+def get_departments():
     """
-    科室 → 医生列表映射的服务封装。
-    目前只是简单把 Repository 的结果透出去，方便路由调用。
+    初始化科室列表：直接调用 Repository.get_departments
+    返回: [{"code": "...", "name": "..."}, ...]
     """
-    try:
-        return repo.get_dep_doc_map()
-    except Exception as e:
-        logger.exception("Error fetching dep-doc map: %s", e)
-        raise
+    return repo.get_departments()
 
 
-def get_revenue_details(start, end=None, departments=None):
+def get_doctors():
     """
-    前端分页版：后端返回当前筛选下“全部明细行”
+    初始化医生列表：直接调用 Repository.get_doctors
+    返回: [{"doc_id", "doc_name", "dep_id", "dep_name"}, ...]
     """
-    raw = repo.get_revenue_details(start, end, departments)
+    return repo.get_doctors()
+
+
+def get_revenue_details(start, end=None, departments=None, doctor_ids=None):
+    """
+    明细接口服务层：
+    - 支持科室筛选（departments）和医生筛选（doctor_ids）
+    - Repository 负责：
+        * 按日期拆分历史 / 实时
+        * 历史部分走物化视图 t_dep_income_inp / t_doc_fee_inp
+        * 实时部分走原始表 t_workload_inp_f
+        * 所有情况都按 item_class_name 聚合求总收入 (revenue) 和总数量 (quantity)
+    - 这里不再计算明细级别的同比/环比和床日，直接把 Repository 的结果返回给路由层
+    """
+    return repo.get_revenue_details(start, end, departments, doctor_ids)
+
+
+def get_revenue_details_bak(start, end=None, departments=None, doctors=None):
+    """
+    明细接口 Service 层：
+
+    - 负责处理默认 end（单日 → [start, start+1)）
+    - 调用 Repository.get_revenue_details 得到原始行
+    - 统一格式返回给 routes /details
+    """
+    if end is None:
+        end = start + timedelta(days=1)
+
+    raw_rows = repo.get_revenue_details(start, end, departments, doctors)
 
     rows_out = []
-    for r in raw["rows"]:
-        curr = Decimal(str(r.get("revenue_raw") or "0"))
-        ly = Decimal(str(r.get("ly_revenue_raw") or "0"))
-        prev = Decimal(str(r.get("prev_revenue_raw") or "0"))
-        bed_curr = Decimal(str(r.get("bed_value") or "0"))
-        bed_ly = Decimal(str(r.get("bed_last_year") or "0"))
-
-        rev_growth = safe_pct_change(curr, ly)
-        rev_mom = safe_pct_change(curr, prev)
-        bed_growth = safe_pct_change(bed_curr, bed_ly)
-
-        trend = "持平/未知"
-        try:
-            rev_g = rev_growth or DEC_0
-            bed_g = bed_growth or DEC_0
-            if rev_g > DEC_POS_EPS and bed_g > DEC_POS_EPS:
-                trend = "同向"
-            elif rev_g < DEC_NEG_EPS and bed_g < DEC_NEG_EPS:
-                trend = "同向"
-            elif (rev_g > DEC_POS_EPS and bed_g < DEC_NEG_EPS) or (rev_g < DEC_NEG_EPS and bed_g > DEC_POS_EPS):
-                trend = "反向"
-        except Exception:
-            logger.exception("Error computing trend")
-
+    for r in raw_rows:
         rows_out.append({
-            "date": r["date"],
-            "department_code": r["department_code"],
-            "department_name": r["department_name"],
-            "revenue": float(curr.quantize(Decimal("0.01"))),
-            "revenue_growth_pct": float(rev_growth * DEC_100) if rev_growth else None,
-            "revenue_mom_growth_pct": float(rev_mom * DEC_100) if rev_mom else None,
-            "trend": trend,
+            "date": r.get("date"),
+            "department_name": r.get("department_name"),
+            # 下面字段在不同筛选模式下可能为 None
+            "doctor_name": r.get("doctor_name"),
+            "item_class_name": r.get("item_class_name"),
+            "revenue": float(r.get("revenue") or 0.0),
+            "quantity": (
+                float(r.get("quantity"))
+                if r.get("quantity") is not None
+                else None
+            ),
         })
 
     return {"rows": rows_out, "total": len(rows_out)}

@@ -1,5 +1,5 @@
 // src/components/common/TrendChart.tsx
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -25,29 +25,24 @@ ChartJS.register(
 export interface TrendChartDataset {
   label: string;
   data: number[];
-  /** 线条/填充颜色，可选 */
   color?: string;
 }
 
 export interface TrendChartProps {
-  /** X 轴标签，如日期数组 */
   labels: string[];
-  /** 数据集列表，可多条线 */
   datasets: TrendChartDataset[];
-  /** 图表标题 */
   title?: string;
-  /** X 轴标题 */
   xLabel?: string;
-  /** Y 轴标题 */
   yLabel?: string;
-  /** 是否加载中 */
   loading?: boolean;
-  /** 没有数据时的提示文案 */
   emptyText?: string;
-  /** 容器高度 className，默认 h-96 */
-  heightClassName?: string;
 }
 
+/**
+ * 🔥 自动高度 TrendChart：
+ * - 宽度自适应（Chart.js 默认支持）
+ * - 高度会根据 labels 数量自动扩展，避免挤压或溢出
+ */
 export const TrendChart: React.FC<TrendChartProps> = ({
   labels,
   datasets,
@@ -56,11 +51,22 @@ export const TrendChart: React.FC<TrendChartProps> = ({
   yLabel = "Y 轴",
   loading = false,
   emptyText = "暂无图表数据",
-  heightClassName = "h-96",
 }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  /** ⭐ 自动高度公式 */
+  const computeHeight = () => {
+    const base = 260;            // 基本高度
+    const extraPer10 = 80;       // 每 10 个标签增加的高度
+    const blocks = Math.ceil(labels.length / 10);
+    return base + (blocks - 1) * extraPer10;
+  };
+
+  const chartHeight = computeHeight();
+
   const hasData =
     labels.length > 0 &&
-    datasets.some((ds) => Array.isArray(ds.data) && ds.data.length > 0);
+    datasets.some((ds) => ds.data && ds.data.length > 0);
 
   const chartData = {
     labels,
@@ -75,35 +81,33 @@ export const TrendChart: React.FC<TrendChartProps> = ({
 
   const options: any = {
     responsive: true,
-    maintainAspectRatio: false, // 添加这行
+    maintainAspectRatio: false, // ⭐ 允许高度增长
     plugins: {
-      legend: {
-        position: "top" as const,
-      },
-      title: {
-        display: !!title,
-        text: title,
-      },
+      legend: { position: "top" },
+      title: { display: !!title, text: title },
     },
     scales: {
       x: {
-        title: {
-          display: !!xLabel,
-          text: xLabel,
+        title: { display: !!xLabel, text: xLabel },
+        ticks: {
+          maxRotation: 45,
+          minRotation: 25,
         },
       },
       y: {
-        title: {
-          display: !!yLabel,
-          text: yLabel,
-        },
+        title: { display: !!yLabel, text: yLabel },
       },
     },
   };
 
   return (
-    // 修改容器样式，添加相对定位和宽度控制
-    <div className={`relative w-full ${heightClassName}`}>
+    <div
+      ref={containerRef}
+      className="relative w-full"
+      style={{
+        height: `${chartHeight}px`, // ⭐ 动态高度设置
+      }}
+    >
       {loading ? (
         <div className="flex items-center justify-center h-full">
           <div className="text-center">
@@ -112,17 +116,12 @@ export const TrendChart: React.FC<TrendChartProps> = ({
           </div>
         </div>
       ) : hasData ? (
-        // 给图表容器添加样式
-        <div className="w-full h-full">
-          <Line data={chartData} options={options} />
-        </div>
+        <Line data={chartData} options={options} />
       ) : (
         <div className="flex items-center justify-center h-full">
           <div className="text-center">
             <p className="text-gray-500 mb-1">{emptyText}</p>
-            <p className="text-xs text-gray-400">
-              请检查查询条件或数据源配置
-            </p>
+            <p className="text-xs text-gray-400">请检查查询条件或数据源</p>
           </div>
         </div>
       )}

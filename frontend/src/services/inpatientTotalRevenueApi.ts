@@ -6,6 +6,7 @@
 //   2. DetailsResponse 不再包含 limit/offset
 //   3. 后端 /details 只需返回 rows + total
 //   4. /init 现在返回 doctors（医生+科室映射）
+//   5. fetchDetailsAPI 增加 doctors 字段
 // ------------------------------------------------------
 export type Trend = "同向" | "反向" | "持平/未知" | string;
 
@@ -18,7 +19,8 @@ export interface DoctorOption {
   id: string;
   name: string;
 }
-// 科室下医生结构（来自 /doc_dep_map）
+
+// 科室下医生结构（来自 /init 的 doctors）
 export interface DepDoctor {
   doc_id: string;
   doc_name: string;
@@ -54,6 +56,8 @@ export interface DetailsRow {
   trend?: Trend;
   doctor_id?: string;
   doctor_name?: string;
+  item_class_name?: string;
+  quantity?: number;
 }
 
 // ⭐ InitResponse：增加 doctors 字段（来自 get_doc_dep_map）
@@ -199,18 +203,26 @@ export async function fetchSummaryAPI(params: {
 }
 
 // ⭐ 关键修改：后端不分页 → 删除 limit / offset 参数
+// ⭐ 同时增加 doctors 字段，把医生 ID 传给后端
 export async function fetchDetailsAPI(params: {
   start: string;
   end: string;
   deps?: string[] | null;
+  doctors?: string[] | null;
 }): Promise<DetailsResponse> {
-  const { start, end, deps } = params;
+  const { start, end, deps, doctors } = params;
 
   const payload: Record<string, any> = {
     start_date: start,
     end_date: end,
   };
-  if (deps && deps.length) payload.departments = deps;
+  if (deps && deps.length) {
+    // 这里 deps 已经是“科室名称”数组（由 hooks 里 getDepsOrNull 处理）
+    payload.departments = deps;
+  }
+  if (doctors && doctors.length) {
+    payload.doctors = doctors;
+  }
 
   const res = await apiFetch(`${API_BASE}/details`, {
     method: "POST",
@@ -373,6 +385,6 @@ export function deriveDoctors(rows: any[]): DoctorOption[] {
       const key = String(id);
       if (!map.has(key)) map.set(key, String(name ?? id));
     }
-  }
+    }
   return Array.from(map, ([id, name]) => ({ id, name }));
 }
