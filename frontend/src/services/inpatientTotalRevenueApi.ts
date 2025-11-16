@@ -388,3 +388,51 @@ export function deriveDoctors(rows: any[]): DoctorOption[] {
     }
   return Array.from(map, ([id, name]) => ({ id, name }));
 }
+/* =================== 统一查询接口（/query） =================== */
+
+export interface FullQuerySummary extends SummaryViewModel {
+  /** 查询期内总床日数（可选，用于展示） */
+  total_bed_days?: number;
+}
+
+export interface FullQueryResponse {
+  success: boolean;
+  date_range?: { start: string; end: string };
+  departments?: string[] | null;
+  doctors?: string[] | null;
+  summary?: FullQuerySummary | null;
+  /** 折线图数据 */
+  timeseries?: TSRow[];
+  /** 明细数据（推荐使用 details） */
+  details?: DetailsRow[];
+  /** 为兼容，后端也可能返回 rows 字段 */
+  rows?: DetailsRow[];
+  total?: number;
+}
+
+/**
+ * 统一查询接口：后端会根据是否有 doctors 自动切换科室/医生模式
+ */
+export async function fetchFullAPI(params: {
+  start: string;
+  end: string;
+  deps?: string[] | null;
+  docs?: string[] | null;
+}): Promise<FullQueryResponse> {
+  const { start, end, deps, docs } = params;
+
+  const payload: Record<string, any> = {
+    start_date: start,
+    end_date: end,
+  };
+  if (deps && deps.length) payload.departments = deps;
+  if (docs && docs.length) payload.doctors = docs;
+
+  const res = await apiFetch(`${API_BASE}/query`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`QUERY 请求失败：${res.status}`);
+  return res.json();
+}

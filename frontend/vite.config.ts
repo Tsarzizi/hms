@@ -76,7 +76,12 @@ export default defineConfig({
       //   secure: false,
       // },
       // 住院总收入服务
-      '/api/inpatient_total_revenue': {
+//      '/api/inpatient_total_revenue': {
+//        target: 'http://localhost:5010',
+//        changeOrigin: true,
+//        secure: false,
+//      },
+      '/api': {
         target: 'http://localhost:5010',
         changeOrigin: true,
         secure: false,
