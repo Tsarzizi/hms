@@ -317,6 +317,7 @@ def filter_options():
 # ----------------
 @bp.route("/trend-data", methods=["GET"])
 def trend_data():
+    """返回区间内所有月度科室的明细数据，前端自行聚合。"""
     try:
         start_date = request.args.get("start_date", "")
         end_date = request.args.get("end_date", "")
@@ -324,11 +325,8 @@ def trend_data():
         dep_type = request.args.get("department_type", "")
         dep_name = request.args.get("department_name", "")
 
-        # 参数验证
         if not start_date or not end_date:
             return jsonify({"error": "起始日期和结束日期不能为空", "items": []}), 400
-
-        print(f"趋势数据查询参数: start_date={start_date}, end_date={end_date}")  # 调试日志
 
         filter_clause, params = build_trend_filter_clause(
             start_date, end_date, dep_category, dep_type, dep_name
@@ -337,15 +335,18 @@ def trend_data():
         sql = f"""
             SELECT
                 yyyy_mm AS month,
-                SUM(COALESCE("绩效总额",0)) AS total_performance,
-                SUM(COALESCE("结算收入",0)) AS total_settlement_income,
-                SUM(COALESCE("人数",0)) AS total_staff_count
+                "绩效科室ID" AS department_id,
+                "绩效科室类别" AS department_category,
+                "绩效科室类型" AS department_type,
+                "绩效科室名称" AS department_name,
+                COALESCE("人数", 0) AS staff_count,
+                COALESCE("结算收入", 0) AS settlement_income,
+                COALESCE("绩效总额", 0) AS total_performance
             FROM (
                 {BASE_PERFORMANCE_SQL}
             ) AS combined
             {filter_clause}
-            GROUP BY yyyy_mm
-            ORDER BY yyyy_mm
+            ORDER BY yyyy_mm, "绩效科室类别", "绩效科室类型", "同类序号"
         """
 
         conn = get_conn()
@@ -353,23 +354,25 @@ def trend_data():
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(sql, params)
                 rows = cur.fetchall()
-                print(f"查询到 {len(rows)} 条趋势数据")  # 调试日志
         finally:
             put_conn(conn)
 
         items = []
         for r in rows:
             items.append({
-                "month": r["month"],
-                "totalPerformance": to_float(r["total_performance"]),
-                "totalSettlementIncome": to_float(r["total_settlement_income"]),
-                "totalStaffCount": int(r["total_staff_count"] or 0),
+                "month": r.get("month"),
+                "departmentId": r.get("department_id"),
+                "departmentCategory": r.get("department_category"),
+                "departmentType": r.get("department_type"),
+                "departmentName": r.get("department_name"),
+                "staffCount": int(r.get("staff_count") or 0),
+                "settlementIncome": to_float(r.get("settlement_income")),
+                "totalPerformance": to_float(r.get("total_performance")),
             })
 
         return jsonify({"items": items})
 
     except Exception as e:
-        print(f"趋势数据查询错误: {str(e)}")  # 调试日志
         return jsonify({"error": f"获取趋势数据失败: {str(e)}", "items": []}), 500
 
 

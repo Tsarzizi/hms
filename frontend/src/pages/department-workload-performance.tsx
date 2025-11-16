@@ -68,28 +68,43 @@ interface SummaryData {
 }
 
 interface TrendItem {
-  month: string; // 202401 或 2024-01
+  month: string; // yyyymm
+  departmentId: string;
+  departmentCategory: string;
+  departmentType: string;
+  departmentName: string;
+  staffCount: number;
+  settlementIncome: number;
+  totalPerformance: number;
+}
+
+interface AggregatedTrendItem {
+  month: string;
   totalPerformance: number;
   totalSettlementIncome: number;
   totalStaffCount: number;
+  recordCount: number;
 }
 
 /** ---------- 趋势图表组件 ---------- */
-function TrendChart({ data }: { data: TrendItem[] }) {
-  const normalized = data.map((d) => {
-    // 兼容 "202401" 或 "2024-01"
-    let label = d.month;
-    if (/^\d{6}$/.test(d.month)) {
-      label = `${d.month.slice(0, 4)}-${d.month.slice(4, 6)}`;
-    }
-    return { ...d, month: label };
-  });
+function TrendChart({
+  data,
+  detailByMonth,
+}: {
+  data: AggregatedTrendItem[];
+  detailByMonth: Record<string, TrendItem[]>;
+}) {
+  const normalized = data.map((d) => ({
+    ...d,
+    month: `${d.month.slice(0, 4)}-${d.month.slice(4, 6)}`,
+  }));
 
   if (normalized.length === 0) {
-    return
+    return (
       <div className="h-80 bg-gray-50 rounded-lg flex items-center justify-center text-gray-400">
         暂无趋势数据
-      </div>;
+      </div>
+    );
   }
 
   return (
@@ -119,22 +134,33 @@ function TrendChart({ data }: { data: TrendItem[] }) {
           }
         />
         <Tooltip
-          formatter={(value: any, name: string) => {
-            const num = Number(value) || 0;
-            if (name === "totalStaffCount") {
-              return [num, "人员数量"];
-            }
-            return [
-              `￥${num.toLocaleString("zh-CN", {
-                minimumFractionDigits: 0,
-                maximumFractionDigits: 2,
-              })}`,
-              name === "totalPerformance" ? "绩效总额" : "结算收入",
-            ];
-          }}
-          labelFormatter={(label) => {
-            const arr = String(label).split("-");
-            return `${arr[0]}年${arr[1]}月`;
+          content={({ label, payload }) => {
+            const monthKey = (label || "").replace("-", "");
+            const details = detailByMonth[monthKey] || [];
+            return (
+              <div className="bg-white rounded-lg shadow-lg p-3 border border-gray-200">
+                <div className="font-semibold text-gray-900 mb-1">
+                  {label} 月份明细
+                </div>
+                {(payload || []).map((entry) => (
+                  <div key={entry.name} className="text-sm text-gray-700">
+                    {entry.name === "totalPerformance" ? "绩效总额" :
+                    entry.name === "totalSettlementIncome" ? "结算收入" : "人员数量"}
+                    ：
+                    {entry.name === "totalStaffCount"
+                      ? Number(entry.value || 0).toLocaleString("zh-CN")
+                      : `￥${Number(entry.value || 0).toLocaleString("zh-CN", {
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 2,
+                        })}`}
+                  </div>
+                ))}
+                <div className="mt-2 text-xs text-gray-500">
+                  {details.length ? "包含科室：" : "无明细数据"}
+                  {details.map((d) => d.departmentName).join("、")}
+                </div>
+              </div>
+            );
           }}
         />
         <Legend />
@@ -262,6 +288,38 @@ export default function DepartmentWorkloadPerformancePage() {
 
   // 趋势数据
   const [trendData, setTrendData] = useState<TrendItem[]>([]);
+
+  const trendDetailByMonth = useMemo(() => {
+    const grouped: Record<string, TrendItem[]> = {};
+    trendData.forEach((item) => {
+      if (!grouped[item.month]) grouped[item.month] = [];
+      grouped[item.month].push(item);
+    });
+    return grouped;
+  }, [trendData]);
+
+  const aggregatedTrendData = useMemo<AggregatedTrendItem[]>(() => {
+    const map = new Map<string, AggregatedTrendItem>();
+    trendData.forEach((item) => {
+      const exists = map.get(item.month);
+      if (exists) {
+        exists.totalPerformance += item.totalPerformance || 0;
+        exists.totalSettlementIncome += item.settlementIncome || 0;
+        exists.totalStaffCount += item.staffCount || 0;
+        exists.recordCount += 1;
+      } else {
+        map.set(item.month, {
+          month: item.month,
+          totalPerformance: item.totalPerformance || 0,
+          totalSettlementIncome: item.settlementIncome || 0,
+          totalStaffCount: item.staffCount || 0,
+          recordCount: 1,
+        });
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.month.localeCompare(b.month));
+  }, [trendData]);
 
   /** ---------- 请求封装 ---------- */
 
@@ -407,7 +465,16 @@ export default function DepartmentWorkloadPerformancePage() {
         throw new Error("获取趋势数据失败：服务器返回的不是合法 JSON");
       }
 
-      const items = (data.items || data || []) as TrendItem[];
+      const items = (data.items || data || []).map((d: any) => ({
+        month: d.month,
+        departmentId: String(d.departmentId || ""),
+        departmentCategory: d.departmentCategory || "",
+        departmentType: d.departmentType || "",
+        departmentName: d.departmentName || "",
+        staffCount: Number(d.staffCount || 0),
+        settlementIncome: Number(d.settlementIncome || 0),
+        totalPerformance: Number(d.totalPerformance || 0),
+      })) as TrendItem[];
       setTrendData(items);
     } catch (e: any) {
       console.error("获取趋势数据失败:", e);
@@ -523,32 +590,65 @@ export default function DepartmentWorkloadPerformancePage() {
     setCurrentPage(1);
   };
 
-  // 同比环比（简单模拟：用当前值基础上做个 5% / 2% 浮动）
+  const selectedYyyymm = formatMonthParam(selectedDate);
+
+  const shiftMonth = (yyyymm: string, offset: number) => {
+    if (!yyyymm || yyyymm.length !== 6) return "";
+    const year = Number(yyyymm.slice(0, 4));
+    const month = Number(yyyymm.slice(4, 6));
+    const date = new Date(year, month - 1, 1);
+    date.setMonth(date.getMonth() + offset);
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    return `${y}${m}`;
+  };
+
+  const trendMap = useMemo(() => {
+    const m = new Map<string, AggregatedTrendItem>();
+    aggregatedTrendData.forEach((item) => m.set(item.month, item));
+    return m;
+  }, [aggregatedTrendData]);
+
+  // 同比环比（使用趋势明细聚合结果真实计算）
   const growthData = useMemo(() => {
-    const totalPerformance = summaryData.totalPerformance;
-    const totalSettlementIncome = summaryData.totalSettlementIncome;
-    const totalStaffCount = summaryData.totalStaffCount;
-    const perCapitaPerformance = summaryData.totalPerCapitaPerformance;
+    const current = trendMap.get(selectedYyyymm);
+    const previousMonth = trendMap.get(shiftMonth(selectedYyyymm, -1));
+    const previousYear = trendMap.get(shiftMonth(selectedYyyymm, -12));
+
+    const currentPerformance = current?.totalPerformance || 0;
+    const currentIncome = current?.totalSettlementIncome || 0;
+    const currentStaff = current?.totalStaffCount || 0;
+    const currentPerCapita = currentStaff
+      ? currentPerformance / currentStaff
+      : 0;
+
+    const prevPerformance = previousMonth?.totalPerformance || 0;
+    const prevIncome = previousYear?.totalSettlementIncome || 0;
+    const prevStaff = previousMonth?.totalStaffCount || 0;
+    const prevPerCapita = previousYear?.totalStaffCount
+      ? (previousYear.totalPerformance || 0) /
+        (previousYear.totalStaffCount || 1)
+      : 0;
 
     return {
       performanceGrowth: {
-        current: totalPerformance,
-        previous: totalPerformance * 0.95,
+        current: currentPerformance,
+        previous: prevPerformance,
       },
       incomeGrowth: {
-        current: totalSettlementIncome,
-        previous: totalSettlementIncome * 1.02,
+        current: currentIncome,
+        previous: prevIncome,
       },
       staffGrowth: {
-        current: totalStaffCount,
-        previous: totalStaffCount * 0.98,
+        current: currentStaff,
+        previous: prevStaff,
       },
       perCapitaGrowth: {
-        current: perCapitaPerformance,
-        previous: perCapitaPerformance * 1.03,
+        current: currentPerCapita,
+        previous: prevPerCapita,
       },
     };
-  }, [summaryData]);
+  }, [trendMap, selectedYyyymm]);
 
   const startIndex =
     totalCount === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
@@ -735,25 +835,25 @@ export default function DepartmentWorkloadPerformancePage() {
       {/* 同比环比数据 */}
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <GrowthCard
-          title="绩效总额环比（模拟）"
+          title="绩效总额环比"
           currentValue={growthData.performanceGrowth.current}
           previousValue={growthData.performanceGrowth.previous}
           type="currency"
         />
         <GrowthCard
-          title="结算收入同比（模拟）"
+          title="结算收入同比"
           currentValue={growthData.incomeGrowth.current}
           previousValue={growthData.incomeGrowth.previous}
           type="currency"
         />
         <GrowthCard
-          title="人员数量环比（模拟）"
+          title="人员数量环比"
           currentValue={growthData.staffGrowth.current}
           previousValue={growthData.staffGrowth.previous}
           type="number"
         />
         <GrowthCard
-          title="人均绩效同比（模拟）"
+          title="人均绩效同比"
           currentValue={growthData.perCapitaGrowth.current}
           previousValue={growthData.perCapitaGrowth.previous}
           type="currency"
@@ -765,7 +865,7 @@ export default function DepartmentWorkloadPerformancePage() {
         <h2 className="text-lg font-semibold text-gray-900 mb-4 text-left">
           绩效趋势分析
         </h2>
-        <TrendChart data={trendData} />
+        <TrendChart data={aggregatedTrendData} detailByMonth={trendDetailByMonth} />
       </section>
 
       {/* 数据表格 */}
