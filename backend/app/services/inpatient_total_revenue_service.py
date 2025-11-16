@@ -1,3 +1,5 @@
+# backend/app/services/inpatient_total_revenue_service.py
+
 import logging
 from datetime import date
 from typing import Any, Dict, List, Optional
@@ -13,7 +15,7 @@ _repo = InpatientTotalRevenueRepository()
 
 def get_dep_doc_map() -> List[Dict[str, Any]]:
     """
-    简单封装：返回科室 + 医生映射，用于前端初始化。
+    返回科室 + 医生映射，用于前端初始化。
     """
     return _repo.get_dep_doc_map()
 
@@ -25,7 +27,7 @@ def get_full_revenue(
     doctors: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
-    统一查询入口，直接转调 Repository：
+    统一查询入口：
     - start / end：日期（end 为「开区间」，一般为 查询结束日期 + 1 天）
     - departments：绩效科室名称列表（可空）
     - doctors：医生工号列表（可空）

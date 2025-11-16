@@ -3,8 +3,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CompareKind } from "../../components/base/LineChart";
 
 import {
-  fetchInitAPI,
+  extractSummaryFromStd,
   fetchFullAPI,
+  fetchInitAPI,
   getToday,
   type SortKey,
   type TSRow,
@@ -34,16 +35,15 @@ export function useInpatientTotalRevenuePage() {
   // 全量医生列表（不受科室筛选）
   const [allDoctors, setAllDoctors] = useState<UIDoctorOption[]>([]);
 
-  // 科室 / 医生筛选（科室影响后端查询，医生只在前端过滤 & 传给后端）
+  // 科室 / 医生筛选（科室影响后端查询，医生也会传给后端）
   const [selectedDeps, setSelectedDepsRaw] = useState<string[]>([]);
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
 
-  // 设置科室时，同时清理掉不属于这些科室的已选医生
+  // 设置科室时清理不属于这些科室的已选医生
   const setSelectedDeps = useCallback(
     (deps: string[]) => {
       setSelectedDepsRaw(deps);
 
-      // 没选科室时，不强制清空医生（保持原有行为）
       if (!deps.length) return;
 
       setSelectedDocs((prev) =>
@@ -58,7 +58,6 @@ export function useInpatientTotalRevenuePage() {
 
   // 根据选中的科室，推导当前可选医生列表
   const doctors = useMemo(() => {
-    // 没选科室 → 视为全部科室
     if (!selectedDeps.length) return allDoctors;
     return allDoctors.filter((d) => selectedDeps.includes(d.dep_code));
   }, [allDoctors, selectedDeps]);
@@ -68,10 +67,10 @@ export function useInpatientTotalRevenuePage() {
   // ✅ 明细：前端分页
   const rowsPerPage = INPATIENT_ROWS_PER_PAGE;
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0); // 当前筛选下的总行数
-  const [details, setDetails] = useState<DetailsRow[]>([]); // 当前筛选下的全部明细行
+  const [total, setTotal] = useState(0);
+  const [details, setDetails] = useState<DetailsRow[]>([]);
 
-  // 排序
+  // 排序（目前只是占位，后面需要可以实现前端排序）
   const [sortKey, setSortKey] = useState<SortKey>(INPATIENT_DEFAULT_SORT_KEY);
   const [sortDir, setSortDir] = useState<"asc" | "desc">(
     INPATIENT_DEFAULT_SORT_DIR
@@ -127,9 +126,11 @@ export function useInpatientTotalRevenuePage() {
   // ---- 核心拉数逻辑 ----
 
   const applyFullResult = (payload: FullQueryResponse) => {
-    const sum = (payload.summary ?? null) as SummaryViewModel | null;
-    setSummary(sum);
+    // 1）汇总：用 extractSummaryFromStd 解析同比/环比
+    const vm = extractSummaryFromStd(payload);
+    setSummary(vm);
 
+    // 2）明细
     const rows = ((payload.details ?? payload.rows) || []) as DetailsRow[];
     setDetails(rows);
     setTotal(
@@ -138,6 +139,7 @@ export function useInpatientTotalRevenuePage() {
         : rows.length
     );
 
+    // 3）趋势
     const ts = (payload.timeseries || []) as TSRow[];
     setTsRows(ts);
   };
@@ -161,15 +163,13 @@ export function useInpatientTotalRevenuePage() {
             name: String(d.doc_name ?? ""),
             dep_code: String(d.dep_id ?? ""),
             dep_name: String(d.dep_name ?? ""),
-            // 这里直接使用 dep_name 作为绩效科室名称
             perf_dep_name: String(d.dep_name ?? ""),
           }))
-          .filter((d) => d.id && d.name); // 简单过滤空数据
+          .filter((d) => d.id && d.name);
 
-        // 保存全量医生
         setAllDoctors(docList);
 
-        // 科室列表：从医生的 dep_code/dep_name 推导去重得到
+        // 科室列表：从医生的 dep_code/dep_name 推导去重
         const depMap = new Map<string, string>();
         const depList: DepartmentOption[] = [];
         for (const d of docList) {
@@ -238,7 +238,6 @@ export function useInpatientTotalRevenuePage() {
         docs,
       });
 
-      // 每次筛选变化后，回到第一页
       setPage(1);
       applyFullResult(full);
     } catch (e: any) {
@@ -277,7 +276,7 @@ export function useInpatientTotalRevenuePage() {
     }
   };
 
-  // 供 FilterBar 显示的简短摘要标签（比如已选项的名称或数量）
+  // FilterBar 展示的标签
   const depSummaryLabel =
     selectedDeps.length > 0
       ? departments
@@ -294,7 +293,7 @@ export function useInpatientTotalRevenuePage() {
           .join(", ")
       : "";
 
-  // 前端分页：只改前端页码，不再请求后端
+  // 前端分页
   const onPageChange = (nextPage: number) => {
     setPage(nextPage);
   };

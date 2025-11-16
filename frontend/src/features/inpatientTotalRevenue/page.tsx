@@ -85,20 +85,21 @@ export default function InpatientTotalRevenuePage() {
 
       {/* ✅ 数据详情模块：只管表格 */}
       <DetailsSection
-        rows={details}
-        page={page}
-        pageSize={rowsPerPage}
-        total={total}
-        loading={loading}
-        sortKey={sortKey}
-        sortDir={sortDir}
-        onChangeSortKey={setSortKey}
-        onChangeSortDir={setSortDir}
-        doctors={doctors}
-        selectedDocs={selectedDocs}
-        onChangeSelectedDocs={setSelectedDocs}
-        onPageChange={onPageChange}
+          details={details}
+          loading={loading}
+          sortKey={sortKey}
+          sortDir={sortDir}
+          onChangeSortKey={setSortKey}
+          onChangeSortDir={setSortDir}
+          doctors={doctors}
+          selectedDocs={selectedDocs}
+          onChangeSelectedDocs={setSelectedDocs}
+          page={page}
+          rowsPerPage={rowsPerPage}
+          total={total}
+          onPageChange={onPageChange}
       />
+
     </div>
   );
 }

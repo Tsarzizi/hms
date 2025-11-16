@@ -1,12 +1,6 @@
 // src/services/inpatientTotalRevenueApi.ts
 // ------------------------------------------------------
-// 住院收入分析 API 服务层（前端分页版）
-// 修改内容：
-//   1. fetchDetailsAPI 不再传 limit / offset
-//   2. DetailsResponse 不再包含 limit/offset
-//   3. 后端 /details 只需返回 rows + total
-//   4. /init 现在返回 doctors（医生+科室映射）
-//   5. fetchDetailsAPI 增加 doctors 字段
+// 住院收入分析 API 服务层（统一 /query 版）
 // ------------------------------------------------------
 export type Trend = "同向" | "反向" | "持平/未知" | string;
 
@@ -20,7 +14,7 @@ export interface DoctorOption {
   name: string;
 }
 
-// 科室下医生结构（来自 /init 的 doctors）
+// 科室下医生结构（来自 /init）
 export interface DepDoctor {
   doc_id: string;
   doc_name: string;
@@ -47,35 +41,38 @@ export interface RevenueSummaryStd {
 }
 
 export interface DetailsRow {
+  // 公共字段
   date: string;
-  department_code: string;
+  department_code?: string;
   department_name?: string;
-  revenue: number;
+
+  // 金额/数量
+  revenue?: number; // 科室模式下的收入
+  cost?: number;    // 医生模式下的花费（后端也会把 cost 复制到 revenue 便于兼容）
+  quantity?: number;
+
+  // 维度
+  item_class_name?: string;
+  doctor_id?: string;
+  doctor_name?: string;
+
+  // 旧有字段，保留兼容
   revenue_growth_pct?: number | null;
   revenue_mom_growth_pct?: number | null;
   trend?: Trend;
-  doctor_id?: string;
-  doctor_name?: string;
-  item_class_name?: string;
-  quantity?: number;
 }
 
-// ⭐ InitResponse：增加 doctors 字段（来自 get_doc_dep_map）
+// InitResponse：增加 doctors 字段（来自 /init）
 export interface InitResponse {
   success: boolean;
   date?: string;
-
-  // 旧的科室列表字段（目前前端已从 doctors 推导，可保留以兼容）
   departments?: DepartmentOption[];
-
-  // 新：医生 + 绩效科室映射
   doctors?: {
     doc_id: string;
     doc_name: string;
     dep_id: string;
     dep_name: string;
   }[];
-
   summary?: RevenueSummaryStd;
 }
 
@@ -88,7 +85,6 @@ export interface SummaryResponse {
   [k: string]: any;
 }
 
-// ⭐ 修改：去掉 limit / offset（后端不再分页）
 export interface DetailsResponse {
   success: boolean;
   rows: DetailsRow[];
@@ -173,14 +169,14 @@ export async function apiFetch(
   }
 }
 
-// 初始化（医生+科室映射 + 汇总 + 今日日期）
+// 初始化（医生+科室映射）
 export async function fetchInitAPI(): Promise<InitResponse> {
   const res = await apiFetch(`${API_BASE}/init`);
   if (!res.ok) throw new Error(`INIT 请求失败：${res.status}`);
   return res.json();
 }
 
-// 汇总（summary）
+// 旧的 summary/details/timeseries API（如果别的地方没用了，可以不再调用）
 export async function fetchSummaryAPI(params: {
   start: string;
   end: string;
@@ -202,57 +198,53 @@ export async function fetchSummaryAPI(params: {
   return res.json();
 }
 
-// ⭐ 关键修改：后端不分页 → 删除 limit / offset 参数
-// ⭐ 同时增加 doctors 字段，把医生 ID 传给后端
-export async function fetchDetailsAPI(params: {
+// --- 统一查询接口 /query ---
+
+export interface FullQuerySummary extends SummaryViewModel {
+  current_bed_days?: number;
+}
+
+export interface FullQueryResponse {
+  success: boolean;
+  date_range?: { start: string; end: string };
+  departments?: string[] | null;
+  doctors?: string[] | null;
+  summary?: FullQuerySummary | null;
+  timeseries?: TSRow[];
+  details?: DetailsRow[];
+  rows?: DetailsRow[]; // 兼容字段
+  total?: number;
+}
+
+/**
+ * 统一查询：后端会根据是否有 doctors 自动切换科室/医生模式
+ */
+export async function fetchFullAPI(params: {
   start: string;
   end: string;
   deps?: string[] | null;
-  doctors?: string[] | null;
-}): Promise<DetailsResponse> {
-  const { start, end, deps, doctors } = params;
+  docs?: string[] | null;
+}): Promise<FullQueryResponse> {
+  const { start, end, deps, docs } = params;
 
   const payload: Record<string, any> = {
     start_date: start,
     end_date: end,
   };
-  if (deps && deps.length) {
-    // 这里 deps 已经是“科室名称”数组（由 hooks 里 getDepsOrNull 处理）
-    payload.departments = deps;
-  }
-  if (doctors && doctors.length) {
-    payload.doctors = doctors;
-  }
-
-  const res = await apiFetch(`${API_BASE}/details`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(`DETAILS 请求失败：${res.status}`);
-  return res.json();
-}
-
-// 趋势数据
-export async function fetchTimeseriesAPI(params: {
-  start: string;
-  end: string;
-  deps?: string[] | null;
-}): Promise<TSResponse> {
-  const { start, end, deps } = params;
-  const payload: Record<string, any> = { start_date: start, end_date: end };
   if (deps && deps.length) payload.departments = deps;
+  if (docs && docs.length) payload.doctors = docs;
 
-  const res = await apiFetch(`${API_BASE}/timeseries`, {
+  const res = await apiFetch(`${API_BASE}/query`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(`TIMESERIES 请求失败：${res.status}`);
+  if (!res.ok) throw new Error(`QUERY 请求失败：${res.status}`);
   return res.json();
 }
 
 // --- 汇总模型转换 ---
+
 export interface SummaryViewModel {
   total_revenue?: number;
   yoy_growth_rate?: number;
@@ -263,7 +255,6 @@ export interface SummaryViewModel {
 }
 
 export function extractSummaryFromStd(payload: any): SummaryViewModel | null {
-  const rev = payload?.revenue || {};
   const std = payload?.summary || {};
   const bed = (payload as any)?.bed || {};
 
@@ -278,24 +269,18 @@ export function extractSummaryFromStd(payload: any): SummaryViewModel | null {
   };
 
   const out: SummaryViewModel = {};
-  const current = toNum(rev.current_total ?? std.current);
-  const yoy = toNum(
-    rev.growth_rate_pct ?? std.growth_rate ?? std.growth_rate_pct
-  );
-  const mom = toNum(
-    rev.mom_growth_pct ?? std.mom_growth_rate ?? std.mom ?? std.mom_growth_pct
-  );
+  const current = toNum(std.current);
+  const yoy = toNum(std.growth_rate);
+  const mom = toNum(std.mom_growth_rate);
   const bedYoy = toNum(
     (payload as any)?.bed_growth_pct ??
       bed.growth_rate_pct ??
-      (std as any)?.bed_growth_rate ??
-      (std as any)?.bed_growth_pct
+      (std as any)?.bed_growth_rate
   );
   const bedMom = toNum(
     (payload as any)?.bed_mom_growth_pct ??
       bed.mom_growth_pct ??
-      (std as any)?.bed_mom_growth_rate ??
-      (std as any)?.bed_mom_growth_pct
+      (std as any)?.bed_mom_growth_rate
   );
 
   if (typeof current !== "undefined") out.total_revenue = current;
@@ -304,13 +289,12 @@ export function extractSummaryFromStd(payload: any): SummaryViewModel | null {
   if (typeof bedYoy !== "undefined") out.bed_day_growth_rate = bedYoy;
   if (typeof bedMom !== "undefined") out.bed_day_mom_growth_rate = bedMom;
 
-  if (typeof (payload?.trend ?? std.trend) === "string")
-    out.trend = payload?.trend ?? std.trend;
+  if (typeof std.trend === "string") out.trend = std.trend;
 
   return Object.keys(out).length ? out : null;
 }
 
-// 缺少环比时自动补一次上一周期 summary
+// 缺少环比时自动补一次上一周期 summary（旧逻辑，保留以备不时之需）
 export async function maybeEnsureMoM(params: {
   currentSummary: SummaryViewModel | null;
   start: string;
@@ -363,9 +347,7 @@ export function formatDate(dateStr?: string | null) {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-// 从明细中推导出医生列表（用于前端筛选）
-// 现在主路径改为：从 /init 的 doctors 获取医生，
-// 本方法保留，便于将来需要从明细兜底推导。
+// 从明细中推导出医生列表（兜底）
 export function deriveDoctors(rows: any[]): DoctorOption[] {
   const map = new Map<string, string>();
   for (const r of rows || []) {
@@ -385,54 +367,6 @@ export function deriveDoctors(rows: any[]): DoctorOption[] {
       const key = String(id);
       if (!map.has(key)) map.set(key, String(name ?? id));
     }
-    }
+  }
   return Array.from(map, ([id, name]) => ({ id, name }));
-}
-/* =================== 统一查询接口（/query） =================== */
-
-export interface FullQuerySummary extends SummaryViewModel {
-  /** 查询期内总床日数（可选，用于展示） */
-  total_bed_days?: number;
-}
-
-export interface FullQueryResponse {
-  success: boolean;
-  date_range?: { start: string; end: string };
-  departments?: string[] | null;
-  doctors?: string[] | null;
-  summary?: FullQuerySummary | null;
-  /** 折线图数据 */
-  timeseries?: TSRow[];
-  /** 明细数据（推荐使用 details） */
-  details?: DetailsRow[];
-  /** 为兼容，后端也可能返回 rows 字段 */
-  rows?: DetailsRow[];
-  total?: number;
-}
-
-/**
- * 统一查询接口：后端会根据是否有 doctors 自动切换科室/医生模式
- */
-export async function fetchFullAPI(params: {
-  start: string;
-  end: string;
-  deps?: string[] | null;
-  docs?: string[] | null;
-}): Promise<FullQueryResponse> {
-  const { start, end, deps, docs } = params;
-
-  const payload: Record<string, any> = {
-    start_date: start,
-    end_date: end,
-  };
-  if (deps && deps.length) payload.departments = deps;
-  if (docs && docs.length) payload.doctors = docs;
-
-  const res = await apiFetch(`${API_BASE}/query`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(`QUERY 请求失败：${res.status}`);
-  return res.json();
 }

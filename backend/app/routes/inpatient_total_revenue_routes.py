@@ -1,3 +1,5 @@
+# backend/app/routes/inpatient_total_revenue_routes.py
+
 import logging
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
@@ -18,10 +20,6 @@ bp = Blueprint("inpatient_total_revenue", __name__)
 def _parse_departments(payload: Dict[str, Any]) -> Optional[List[str]]:
     """
     从 JSON body / query string 中解析部门名称列表（绩效科室名称）
-    支持：
-      - { "department": "儿科一病区" }
-      - { "departments": ["儿科一病区", "儿科二病区"] }
-      - ?department=儿科一病区&departments=儿科二病区,儿科三病区
     """
     dep_single = payload.get("department") or request.args.get("department")
     deps_field = payload.get("departments") or request.args.get("departments")
@@ -42,10 +40,6 @@ def _parse_departments(payload: Dict[str, Any]) -> Optional[List[str]]:
 def _parse_doctors(payload: Dict[str, Any]) -> Optional[List[str]]:
     """
     从 JSON body / query string 中解析医生工号列表
-    支持：
-      - { "doctor": "8035" }
-      - { "doctors": ["8035", "8036"] }
-      - ?doctors=8035,8036
     """
     doc_single = payload.get("doctor") or request.args.get("doctor")
     docs_field = payload.get("doctors") or request.args.get("doctors")
@@ -69,17 +63,16 @@ def init():
     初始化接口：
       - 返回科室列表（code = dep_id, name = dep_name）
       - 返回医生列表（带所在绩效科室）
-      - 不做任何收入计算
     """
     try:
-        cache_key = "inpatient_total_revenue:init:v2"
+        cache_key = "inpatient_total_revenue:init:v3"
         cached = cache_get(cache_key)
         if cached:
             return jsonify(cached), 200
 
         today = date.today()
 
-        rows = get_dep_doc_map()  # [{ dep_id, dep_name, doctors: [{doc_id,doc_name}, ...] }, ...]
+        rows = get_dep_doc_map()
 
         departments: List[Dict[str, Any]] = []
         dep_seen: set = set()
@@ -133,7 +126,7 @@ def query():
         "start_date": "2025-11-10",
         "end_date": "2025-11-14",       # 可选，省略视为单日
         "departments": ["儿科一病区"],  # 可选，绩效科室名称
-        "doctors": ["8035", "8036"]     # 可选，医生工号；有医生时后端忽略科室
+        "doctors": ["8035", "8036"]     # 可选，医生工号；有医生时后端会忽略科室收入查询中的部门条件
       }
     """
     try:
@@ -177,7 +170,6 @@ def query():
         departments = _parse_departments(payload)
         doctors = _parse_doctors(payload)
 
-        # 有医生时，后端会自动忽略部门条件
         logger.info(
             "/query | sd=%s ed=%s departments=%s doctors=%s",
             sd,
@@ -187,7 +179,6 @@ def query():
         )
 
         data = get_full_revenue(sd, ed_exclusive, departments, doctors)
-
         body = {"success": True, **data}
         return jsonify(body), 200
     except Exception as e:

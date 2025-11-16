@@ -1,11 +1,11 @@
-from flask import Blueprint, request, jsonify, send_file
 from decimal import Decimal
 from io import BytesIO
+from flask import Blueprint, request, jsonify, send_file
 
 from openpyxl import Workbook
 from psycopg2.extras import RealDictCursor
 
-from app.utils.db import get_conn, put_conn  # ✅ 使用你现有的连接池
+from .utils.db import get_conn, put_conn  # ✅ 使用你现有的连接池
 
 bp = Blueprint(
     "department_workload_performance",
@@ -13,7 +13,77 @@ bp = Blueprint(
     url_prefix="/api/department_workload_performance"
 )
 
-
+BASE_PERFORMANCE_SQL = """
+SELECT yyyy_mm,
+    "绩效科室ID",
+    "绩效科室名称",
+    "绩效科室类别",
+    "绩效科室类型",
+    "同类序号",
+    COALESCE("人数", 0) AS "人数",
+    COALESCE("结算收入", 0) AS "结算收入",
+    COALESCE("科室直接成本", 0) AS "科室直接成本",
+    COALESCE("绩效总额", 0) AS "绩效总额",
+    COALESCE("绩效总额", 0) / NULLIF(COALESCE("人数", 0), 0) AS "人均绩效",
+    COALESCE("住院工作量点数", 0) AS "住院工作量点数",
+    COALESCE("工作量单价", 0) AS "工作量单价",
+    COALESCE("工作量系数", 0) AS "工作量系数",
+    COALESCE("住院工作量绩效非手术介入", 0) AS "住院工作量绩效非手术介入",
+    COALESCE("基础手术绩效", 0) AS "基础手术绩效",
+    COALESCE("介入绩效", 0) AS "介入绩效",
+    COALESCE("造影绩效", 0) AS "造影绩效",
+    COALESCE("结算收入", 0) AS "结算费用",
+    COALESCE("病种成本", 0) AS "DRG病种成本",
+    COALESCE("DRG结余", 0) AS "DRG结余",
+    COALESCE("drg系数", 0) AS "drg系数",
+    COALESCE("DRG绩效", 0) AS "DRG绩效",
+    COALESCE("门诊工作量点数", 0) AS "门诊工作量点数",
+    COALESCE("门诊工作量绩效非手术介入", 0) AS "门诊工作量绩效非手术介入",
+    COALESCE("门诊基础手术绩效", 0) AS "门诊基础手术绩效",
+    COALESCE("门诊介入绩效", 0) AS "门诊介入绩效",
+    COALESCE("门诊造影绩效", 0) AS "门诊造影绩效",
+    COALESCE("挂号费奖励", 0) AS "挂号费奖励",
+    COALESCE("诊察费奖励", 0) AS "诊察费奖励",
+    COALESCE("三级手术奖励", 0) AS "三级手术奖励",
+    COALESCE("四级手术奖励", 0) AS "四级手术奖励",
+    COALESCE("单项奖励合计", 0) AS "单项奖励合计"
+   FROM m_v_workload_doc_perform_total
+UNION
+SELECT yyyy_mm,
+    "绩效科室ID",
+    "绩效科室名称",
+    "绩效科室类别",
+    "绩效科室类型",
+    "同类序号",
+    COALESCE("人数", 0) AS "人数",
+    COALESCE("结算收入", 0) AS "结算收入",
+    COALESCE("科室直接成本", 0) AS "科室直接成本",
+    COALESCE("绩效总额", 0) AS "绩效总额",
+    COALESCE("绩效总额", 0) / NULLIF(COALESCE("人数", 0), 0) AS "人均绩效",
+    COALESCE("住院工作量点数", 0) AS "住院工作量点数",
+    COALESCE("工作量单价", 0) AS "工作量单价",
+    COALESCE("工作量系数", 0) AS "工作量系数",
+    COALESCE("住院工作量绩效非手术介入", 0) AS "住院工作量绩效非手术介入",
+    COALESCE("基础手术绩效", 0) AS "基础手术绩效",
+    COALESCE("介入绩效", 0) AS "介入绩效",
+    COALESCE("造影绩效", 0) AS "造影绩效",
+    COALESCE("结算收入", 0) AS "结算费用",
+    COALESCE("病种成本", 0) AS "DRG病种成本",
+    COALESCE("DRG结余", 0) AS "DRG结余",
+    COALESCE("drg系数", 0) AS "drg系数",
+    COALESCE("DRG绩效", 0) AS "DRG绩效",
+    COALESCE("门诊工作量点数", 0) AS "门诊工作量点数",
+    COALESCE("门诊工作量绩效非手术介入", 0) AS "门诊工作量绩效非手术介入",
+    COALESCE("门诊基础手术绩效", 0) AS "门诊基础手术绩效",
+    COALESCE("门诊介入绩效", 0) AS "门诊介入绩效",
+    COALESCE("门诊造影绩效", 0) AS "门诊造影绩效",
+    COALESCE("挂号费奖励", 0) AS "挂号费奖励",
+    COALESCE("诊察费奖励", 0) AS "诊察费奖励",
+    COALESCE("三级手术奖励", 0) AS "三级手术奖励",
+    COALESCE("四级手术奖励", 0) AS "四级手术奖励",
+    COALESCE("单项奖励合计", 0) AS "单项奖励合计"
+    from m_v_workload_dep_perform_total
+"""
 # ----------------
 # 工具函数
 # ----------------
@@ -23,6 +93,39 @@ def to_float(v):
     if isinstance(v, Decimal):
         return float(v)
     return float(v)
+
+
+def build_filter_clause(selected_date, dep_category, dep_type, dep_name):
+    clause = """
+        WHERE (%s = '' OR yyyy_mm = %s)
+          AND (%s = '' OR "绩效科室类别" = %s)
+          AND (%s = '' OR "绩效科室类型" = %s)
+          AND (%s = '' OR "绩效科室名称" = %s)
+    """
+    params = [
+        selected_date, selected_date,
+        dep_category, dep_category,
+        dep_type, dep_type,
+        dep_name, dep_name,
+    ]
+    return clause, params
+
+
+def build_trend_filter_clause(start_date, end_date, dep_category, dep_type, dep_name):
+    clause = """
+        WHERE yyyy_mm >= %s
+          AND yyyy_mm <= %s
+          AND (%s = '' OR "绩效科室类别" = %s)
+          AND (%s = '' OR "绩效科室类型" = %s)
+          AND (%s = '' OR "绩效科室名称" = %s)
+    """
+    params = [
+        start_date, end_date,
+        dep_category, dep_category,
+        dep_type, dep_type,
+        dep_name, dep_name,
+    ]
+    return clause, params
 
 
 # ----------------
@@ -38,49 +141,31 @@ def performance_data():
     page_size = int(request.args.get("page_size", "20"))
     offset = (page - 1) * page_size
 
-    # psycopg2 占位符使用 %s，注意顺序对应
-    sql_items = """
+    filter_clause, filter_params = build_filter_clause(
+        selected_date, dep_category, dep_type, dep_name
+    )
+
+    sql_items = f"""
         SELECT *
         FROM (
-            SELECT * FROM m_v_workload_doc_perform_total
-            UNION ALL
-            SELECT * FROM m_v_workload_dep_perform_total
+            {BASE_PERFORMANCE_SQL}
         ) AS combined
-        WHERE yyyy_mm = %s
-          AND (%s = '' OR "绩效科室类别" = %s)
-          AND (%s = '' OR "绩效科室类型" = %s)
-          AND (%s = '' OR "绩效科室名称" = %s)
-        ORDER BY "绩效科室类别", "同类序号"
+        {filter_clause}
+        ORDER BY "绩效科室类别", "绩效科室类型", "同类序号"
         LIMIT %s OFFSET %s
     """
 
-    params_items = [
-        selected_date,
-        dep_category, dep_category,
-        dep_type, dep_type,
-        dep_name, dep_name,
-        page_size, offset,
-    ]
+    params_items = filter_params + [page_size, offset]
 
-    sql_count = """
+    sql_count = f"""
         SELECT COUNT(*) AS total_count
         FROM (
-            SELECT * FROM m_v_workload_doc_perform_total
-            UNION ALL
-            SELECT * FROM m_v_workload_dep_perform_total
+            {BASE_PERFORMANCE_SQL}
         ) AS combined
-        WHERE yyyy_mm = %s
-          AND (%s = '' OR "绩效科室类别" = %s)
-          AND (%s = '' OR "绩效科室类型" = %s)
-          AND (%s = '' OR "绩效科室名称" = %s)
+        {filter_clause}
     """
 
-    params_count = [
-        selected_date,
-        dep_category, dep_category,
-        dep_type, dep_type,
-        dep_name, dep_name,
-    ]
+    params_count = filter_params
 
     conn = get_conn()
     try:
@@ -132,8 +217,12 @@ def summary_data():
     dep_type = request.args.get("department_type", "")
     dep_name = request.args.get("department_name", "")
 
-    sql = """
-        SELECT 
+    filter_clause, filter_params = build_filter_clause(
+        selected_date, dep_category, dep_type, dep_name
+    )
+
+    sql = f"""
+        SELECT
             SUM(COALESCE("人数", 0)) AS total_staff_count,
             SUM(COALESCE("结算收入", 0)) AS total_settlement_income,
             SUM(COALESCE("科室直接成本", 0)) AS total_direct_cost,
@@ -144,22 +233,12 @@ def summary_data():
             SUM(COALESCE("住院工作量点数", 0)) AS total_inpatient_workload_points,
             SUM(COALESCE("住院工作量绩效非手术介入", 0)) AS total_inpatient_workload_performance
         FROM (
-            SELECT * FROM m_v_workload_doc_perform_total
-            UNION ALL
-            SELECT * FROM m_v_workload_dep_perform_total
+            {BASE_PERFORMANCE_SQL}
         ) AS combined
-        WHERE yyyy_mm = %s
-          AND (%s = '' OR "绩效科室类别" = %s)
-          AND (%s = '' OR "绩效科室类型" = %s)
-          AND (%s = '' OR "绩效科室名称" = %s)
+        {filter_clause}
     """
 
-    params = [
-        selected_date,
-        dep_category, dep_category,
-        dep_type, dep_type,
-        dep_name, dep_name,
-    ]
+    params = filter_params
 
     conn = get_conn()
     try:
@@ -185,36 +264,30 @@ def summary_data():
 # ----------------
 @bp.route("/filter-options", methods=["GET"])
 def filter_options():
-    sql_cat = """
+    sql_cat = f"""
         SELECT DISTINCT "绩效科室类别" AS val
         FROM (
-            SELECT "绩效科室类别" FROM m_v_workload_doc_perform_total
-            UNION ALL
-            SELECT "绩效科室类别" FROM m_v_workload_dep_perform_total
+            {BASE_PERFORMANCE_SQL}
         ) x
-        WHERE val IS NOT NULL
+        WHERE "绩效科室类别" IS NOT NULL
         ORDER BY val
     """
 
-    sql_type = """
+    sql_type = f"""
         SELECT DISTINCT "绩效科室类型" AS val
         FROM (
-            SELECT "绩效科室类型" FROM m_v_workload_doc_perform_total
-            UNION ALL
-            SELECT "绩效科室类型" FROM m_v_workload_dep_perform_total
+            {BASE_PERFORMANCE_SQL}
         ) x
-        WHERE val IS NOT NULL
+        WHERE "绩效科室类型" IS NOT NULL
         ORDER BY val
     """
 
-    sql_name = """
+    sql_name = f"""
         SELECT DISTINCT "绩效科室名称" AS val
         FROM (
-            SELECT "绩效科室名称" FROM m_v_workload_doc_perform_total
-            UNION ALL
-            SELECT "绩效科室名称" FROM m_v_workload_dep_perform_total
+            {BASE_PERFORMANCE_SQL}
         ) x
-        WHERE val IS NOT NULL
+        WHERE "绩效科室名称" IS NOT NULL
         ORDER BY val
     """
 
@@ -244,6 +317,7 @@ def filter_options():
 # ----------------
 @bp.route("/trend-data", methods=["GET"])
 def trend_data():
+    """返回区间内所有月度科室的明细数据，前端自行聚合。"""
     try:
         start_date = request.args.get("start_date", "")
         end_date = request.args.get("end_date", "")
@@ -251,62 +325,54 @@ def trend_data():
         dep_type = request.args.get("department_type", "")
         dep_name = request.args.get("department_name", "")
 
-        # 参数验证
         if not start_date or not end_date:
             return jsonify({"error": "起始日期和结束日期不能为空", "items": []}), 400
 
-        print(f"趋势数据查询参数: start_date={start_date}, end_date={end_date}")  # 调试日志
+        filter_clause, params = build_trend_filter_clause(
+            start_date, end_date, dep_category, dep_type, dep_name
+        )
 
-        sql = """
-            SELECT 
+        sql = f"""
+            SELECT
                 yyyy_mm AS month,
-                SUM(COALESCE("绩效总额",0)) AS total_performance,
-                SUM(COALESCE("结算收入",0)) AS total_settlement_income,
-                SUM(COALESCE("人数",0)) AS total_staff_count
+                "绩效科室ID" AS department_id,
+                "绩效科室类别" AS department_category,
+                "绩效科室类型" AS department_type,
+                "绩效科室名称" AS department_name,
+                COALESCE("人数", 0) AS staff_count,
+                COALESCE("结算收入", 0) AS settlement_income,
+                COALESCE("绩效总额", 0) AS total_performance
             FROM (
-                SELECT * FROM m_v_workload_doc_perform_total
-                UNION ALL
-                SELECT * FROM m_v_workload_dep_perform_total
+                {BASE_PERFORMANCE_SQL}
             ) AS combined
-            WHERE yyyy_mm >= %s
-              AND yyyy_mm <= %s
-              AND (%s = '' OR "绩效科室类别" = %s)
-              AND (%s = '' OR "绩效科室类型" = %s)
-              AND (%s = '' OR "绩效科室名称" = %s)
-            GROUP BY yyyy_mm
-            ORDER BY yyyy_mm
+            {filter_clause}
+            ORDER BY yyyy_mm, "绩效科室类别", "绩效科室类型", "同类序号"
         """
-
-        params = [
-            start_date,
-            end_date,
-            dep_category, dep_category,
-            dep_type, dep_type,
-            dep_name, dep_name,
-        ]
 
         conn = get_conn()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(sql, params)
                 rows = cur.fetchall()
-                print(f"查询到 {len(rows)} 条趋势数据")  # 调试日志
         finally:
             put_conn(conn)
 
         items = []
         for r in rows:
             items.append({
-                "month": r["month"],
-                "totalPerformance": to_float(r["total_performance"]),
-                "totalSettlementIncome": to_float(r["total_settlement_income"]),
-                "totalStaffCount": int(r["total_staff_count"] or 0),
+                "month": r.get("month"),
+                "departmentId": r.get("department_id"),
+                "departmentCategory": r.get("department_category"),
+                "departmentType": r.get("department_type"),
+                "departmentName": r.get("department_name"),
+                "staffCount": int(r.get("staff_count") or 0),
+                "settlementIncome": to_float(r.get("settlement_income")),
+                "totalPerformance": to_float(r.get("total_performance")),
             })
 
         return jsonify({"items": items})
 
     except Exception as e:
-        print(f"趋势数据查询错误: {str(e)}")  # 调试日志
         return jsonify({"error": f"获取趋势数据失败: {str(e)}", "items": []}), 500
 
 
@@ -321,57 +387,41 @@ def export_excel():
     dep_type = data.get("department_type", "")
     dep_name = data.get("department_name", "")
 
-    sql_items = """
+    filter_clause, filter_params = build_filter_clause(
+        selected_date, dep_category, dep_type, dep_name
+    )
+
+    sql_items = f"""
         SELECT *
         FROM (
-            SELECT * FROM m_v_workload_doc_perform_total
-            UNION ALL
-            SELECT * FROM m_v_workload_dep_perform_total
+            {BASE_PERFORMANCE_SQL}
         ) AS combined
-        WHERE yyyy_mm = %s
-          AND (%s = '' OR "绩效科室类别" = %s)
-          AND (%s = '' OR "绩效科室类型" = %s)
-          AND (%s = '' OR "绩效科室名称" = %s)
-        ORDER BY "绩效科室类别","同类序号"
+        {filter_clause}
+        ORDER BY "绩效科室类别","绩效科室类型","同类序号"
     """
 
-    params_items = [
-        selected_date,
-        dep_category, dep_category,
-        dep_type, dep_type,
-        dep_name, dep_name,
-    ]
+    params_items = filter_params
 
-    sql_summary = """
-        SELECT 
+    sql_summary = f"""
+        SELECT
             SUM(COALESCE("人数", 0)) as total_staff_count,
             SUM(COALESCE("结算收入", 0)) as total_settlement_income,
             SUM(COALESCE("科室直接成本", 0)) as total_direct_cost,
             SUM(COALESCE("绩效总额", 0)) as total_performance,
-            CASE 
-                WHEN SUM(COALESCE("人数", 0)) > 0 
+            CASE
+                WHEN SUM(COALESCE("人数", 0)) > 0
                 THEN SUM(COALESCE("绩效总额", 0)) / SUM(COALESCE("人数", 0))
-                ELSE 0 
+                ELSE 0
             END as total_per_capita_performance,
             SUM(COALESCE("住院工作量点数", 0)) as total_inpatient_workload_points,
             SUM(COALESCE("住院工作量绩效非手术介入", 0)) as total_inpatient_workload_performance
         FROM (
-            SELECT * FROM m_v_workload_doc_perform_total
-            UNION ALL
-            SELECT * FROM m_v_workload_dep_perform_total
+            {BASE_PERFORMANCE_SQL}
         ) AS combined
-        WHERE yyyy_mm = %s
-          AND (%s = '' OR "绩效科室类别" = %s)
-          AND (%s = '' OR "绩效科室类型" = %s)
-          AND (%s = '' OR "绩效科室名称" = %s)
+        {filter_clause}
     """
 
-    params_summary = [
-        selected_date,
-        dep_category, dep_category,
-        dep_type, dep_type,
-        dep_name, dep_name,
-    ]
+    params_summary = filter_params
 
     conn = get_conn()
     try:

@@ -1,5 +1,7 @@
+# backend/app/repositories/inpatient_total_revenue_repository.py
+
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -7,6 +9,8 @@ from ..utils.db import get_conn, put_conn
 
 logger = logging.getLogger("inpatient_total_revenue.repository")
 
+
+# ========== 小工具函数 ==========
 
 def _norm_deps(dep_or_deps) -> Optional[List[str]]:
     """
@@ -47,8 +51,8 @@ def _norm_docs(doc_or_docs) -> Optional[List[str]]:
 def _prim_for_json(v: Any):
     """
     将 DB 值转成 JSON 友好的基础类型
+    （注意：日期会转成 ISO 字符串，在 get_full_revenue 再转回 date 对象）
     """
-    from datetime import datetime
     if isinstance(v, Decimal):
         return float(v)
     if isinstance(v, (date, datetime)):
@@ -56,16 +60,60 @@ def _prim_for_json(v: Any):
     return v
 
 
+def _parse_date_str(s: Any) -> Optional[date]:
+    if not s:
+        return None
+    if isinstance(s, date):
+        return s
+    try:
+        # 只取日期部分
+        return date.fromisoformat(str(s)[:10])
+    except Exception:
+        return None
+
+
+def _shift_year(d: date, years: int) -> date:
+    """
+    年份平移：用于去年同期日期映射
+    """
+    try:
+        return d.replace(year=d.year + years)
+    except ValueError:
+        # 处理 2 月 29 日等情况，简单回退到 2 月 28 日
+        if d.month == 2 and d.day == 29:
+            return d.replace(year=d.year + years, month=2, day=28)
+        # 兜底减 365 天
+        return d + timedelta(days=365 * years)
+
+
+def _pct_change(cur: float, base: Optional[float]) -> Optional[float]:
+    """
+    计算百分比变化：
+      - base 为 None：返回 None（无可比数据）
+      - base 为 0：
+          - 当前也是 0 => 0%
+          - 当前非 0   => 0%（按你“初始化也要看到一个数字”的需求处理）
+    """
+    if base is None:
+        return None
+    if base == 0:
+        # 这里按业务需求处理为 0%，如果你想区分“从 0 涨到 X”可以改成 100。
+        return 0.0
+    return (cur - base) / base * 100.0
+
+
+# ========== Repository ==========
+
 class InpatientTotalRevenueRepository:
     """
-    Repository：只负责和 DB 交互，Service 不直接写 SQL。
+    Repository：只负责和 DB 交互。
 
     只暴露两个业务方法：
       - get_dep_doc_map：初始化用，返回科室+医生映射
       - get_full_revenue：统一返回 summary + timeseries + details
     """
 
-    # ========== 通用 DB 工具方法 ==========
+    # ------ 通用 DB 工具方法 ------
 
     def _query_rows(self, sql: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
         conn = get_conn()
@@ -79,7 +127,7 @@ class InpatientTotalRevenueRepository:
         finally:
             put_conn(conn)
 
-    # ========== 业务：科室 → 医生 映射 ==========
+    # ------ 科室 → 医生 映射 ------
 
     def get_dep_doc_map(self) -> List[Dict[str, Any]]:
         """
@@ -123,9 +171,16 @@ class InpatientTotalRevenueRepository:
           d."绩效科室ID";
         """
         rows = self._query_rows(sql, {})
+        # 如果想按工号排序，可以在 Python 再排一下
+        for r in rows:
+            docs = r.get("doctors") or []
+            r["doctors"] = sorted(
+                docs,
+                key=lambda x: str((x or {}).get("doc_id") or "")
+            )
         return rows
 
-    # ========== 内部：科室模式基础数据（历史 + 实时） ==========
+    # ------ 科室模式基础数据（历史 + 实时） ------
 
     def _query_dep_income_rows(
         self,
@@ -213,7 +268,7 @@ class InpatientTotalRevenueRepository:
         """
         return self._query_rows(sql, params)
 
-    # ========== 内部：医生模式基础数据（历史 + 实时） ==========
+    # ------ 医生模式基础数据（历史 + 实时） ------
 
     def _query_doc_income_rows(
         self,
@@ -302,7 +357,7 @@ class InpatientTotalRevenueRepository:
         """
         return self._query_rows(sql, params)
 
-    # ========== 内部：床日（按日期聚合） ==========
+    # ------ 床日（按日期聚合） ------
 
     def _query_bed_by_date(
         self,
@@ -350,7 +405,7 @@ class InpatientTotalRevenueRepository:
         """
         return self._query_rows(sql, params)
 
-    # ========== 统一出口：summary + timeseries + details ==========
+    # ------ 统一出口：summary + timeseries + details ------
 
     def get_full_revenue(
         self,
@@ -364,107 +419,208 @@ class InpatientTotalRevenueRepository:
 
         - 如果有 doctors（医生工号列表），走“医生模式”（忽略部门）
         - 否则走“科室模式”（按部门名称过滤）
+
+        返回：
+        {
+          "date_range": {...},
+          "departments": [...],
+          "doctors": [...],
+          "summary": {...},        # 含 当前收入/床日 + 同比/环比
+          "timeseries": [...],     # 每日收入/床日 + 同比/环比
+          "details": [...],
+          "total": <明细条数>
+        }
         """
         if end is None:
+            end = start + timedelta(days=1)
+
+        if end <= start:
             end = start + timedelta(days=1)
 
         deps = _norm_deps(departments)
         docs = _norm_docs(doctors)
 
-        # 1）收入基础数据
+        # ---------- 1）当前区间基础数据 ----------
         if docs:
-            # 医生模式：忽略部门
-            base_rows = self._query_doc_income_rows(start, end, docs)
             mode = "doctor"
+            base_rows_cur = self._query_doc_income_rows(start, end, docs)
+            base_rows_prev = self._query_doc_income_rows(
+                start - (end - start), start, docs
+            )
+            # 去年同期：start/end 往前平移一年
+            last_start = _shift_year(start, -1)
+            last_end = _shift_year(end, -1)
+            base_rows_last = self._query_doc_income_rows(
+                last_start, last_end, docs
+            )
         else:
-            # 科室模式：按部门名称过滤
-            base_rows = self._query_dep_income_rows(start, end, deps)
             mode = "department"
+            base_rows_cur = self._query_dep_income_rows(start, end, deps)
+            base_rows_prev = self._query_dep_income_rows(
+                start - (end - start), start, deps
+            )
+            last_start = _shift_year(start, -1)
+            last_end = _shift_year(end, -1)
+            base_rows_last = self._query_dep_income_rows(
+                last_start, last_end, deps
+            )
 
-        # 2）床日（与科室有关：医生模式下仍可按部门过滤或全院）
-        bed_rows = self._query_bed_by_date(start, end, deps)
+        # ---------- 2）床日：当前 / 上周期 / 去年同期 ----------
+        bed_rows_cur = self._query_bed_by_date(start, end, deps)
+        bed_rows_prev = self._query_bed_by_date(
+            start - (end - start), start, deps
+        )
+        bed_rows_last = self._query_bed_by_date(
+            last_start, last_end, deps
+        )
 
-        # 3）summary：收入合 + 床日合
-        total_revenue = 0.0
-        for r in base_rows:
-            if mode == "doctor":
-                total_revenue += float(r.get("costs") or 0)
-            else:
-                total_revenue += float(r.get("charges") or 0)
+        # ---------- 3）汇总（summary） ----------
+        def sum_rev(rows: List[Dict[str, Any]]) -> float:
+            field = "costs" if mode == "doctor" else "charges"
+            s = 0.0
+            for r in rows:
+                s += float(r.get(field) or 0.0)
+            return s
 
-        total_bed = 0.0
-        for r in bed_rows:
-            total_bed += float(r.get("bed_days") or 0)
+        def sum_bed(rows: List[Dict[str, Any]]) -> float:
+            s = 0.0
+            for r in rows:
+                s += float(r.get("bed_days") or 0.0)
+            return s
+
+        cur_rev = sum_rev(base_rows_cur)
+        prev_rev = sum_rev(base_rows_prev)
+        last_rev = sum_rev(base_rows_last)
+
+        cur_bed = sum_bed(bed_rows_cur)
+        prev_bed = sum_bed(bed_rows_prev)
+        last_bed = sum_bed(bed_rows_last)
+
+        yoy = _pct_change(cur_rev, last_rev)
+        mom = _pct_change(cur_rev, prev_rev)
+        bed_yoy = _pct_change(cur_bed, last_bed)
+        bed_mom = _pct_change(cur_bed, prev_bed)
 
         summary = {
-            "total_revenue": total_revenue,
-            "total_bed_days": total_bed,
-            "yoy_growth_rate": None,
-            "mom_growth_rate": None,
-            "bed_day_growth_rate": None,
-            "bed_day_mom_growth_rate": None,
-            "trend": None,
+            # 让前端 extractSummaryFromStd 能识别
+            "current": cur_rev,
+            "growth_rate": yoy,
+            "mom_growth_rate": mom,
+            "bed_growth_rate": bed_yoy,
+            "bed_mom_growth_rate": bed_mom,
+            # 顺便把床日总量也带出去
+            "current_bed_days": cur_bed,
         }
 
-        # 4）timeseries：按 date 聚合收入 + 床日
+        # ---------- 4）timeseries（每日收入 & 床日 + 同比 & 环比） ----------
+
         from collections import defaultdict
 
-        rev_by_date: Dict[str, float] = defaultdict(float)
-        for r in base_rows:
-            dt = r.get("rcpt_date") or r.get("date")
+        # 当前区间
+        rev_cur_by_date: Dict[date, float] = defaultdict(float)
+        for r in base_rows_cur:
+            dt = _parse_date_str(r.get("rcpt_date") or r.get("date"))
             if not dt:
                 continue
-            val = float(r.get("costs") or r.get("charges") or 0)
-            rev_by_date[str(dt)] += val
+            val = float(r.get("costs") or r.get("charges") or 0.0)
+            rev_cur_by_date[dt] += val
 
-        bed_by_date: Dict[str, float] = {}
-        for r in bed_rows:
-            dt = r.get("date")
+        bed_cur_by_date: Dict[date, float] = {}
+        for r in bed_rows_cur:
+            dt = _parse_date_str(r.get("date"))
             if not dt:
                 continue
-            bed_by_date[str(dt)] = float(r.get("bed_days") or 0)
+            bed_cur_by_date[dt] = float(r.get("bed_days") or 0.0)
 
-        all_dates = sorted(set(rev_by_date.keys()) | set(bed_by_date.keys()))
+        # 去年同期
+        rev_last_by_date: Dict[date, float] = defaultdict(float)
+        for r in base_rows_last:
+            dt = _parse_date_str(r.get("rcpt_date") or r.get("date"))
+            if not dt:
+                continue
+            val = float(r.get("costs") or r.get("charges") or 0.0)
+            rev_last_by_date[dt] += val
+
+        bed_last_by_date: Dict[date, float] = {}
+        for r in bed_rows_last:
+            dt = _parse_date_str(r.get("date"))
+            if not dt:
+                continue
+            bed_last_by_date[dt] = float(r.get("bed_days") or 0.0)
+
+        all_dates = sorted(set(rev_cur_by_date.keys()) | set(bed_cur_by_date.keys()))
+
         ts_rows: List[Dict[str, Any]] = []
-        for dt in all_dates:
+        prev_rev_val: Optional[float] = None
+        prev_bed_val: Optional[float] = None
+
+        for d in all_dates:
+            rev_val = rev_cur_by_date.get(d, 0.0)
+            bed_val = bed_cur_by_date.get(d, 0.0)
+
+            # 去年同日
+            last_d = _shift_year(d, -1)
+            last_rev_val = rev_last_by_date.get(last_d)
+            last_bed_val = bed_last_by_date.get(last_d)
+
+            yoy_pct = _pct_change(rev_val, last_rev_val)
+            bed_yoy_pct = _pct_change(bed_val, last_bed_val)
+
+            mom_pct = _pct_change(rev_val, prev_rev_val)
+            bed_mom_pct = _pct_change(bed_val, prev_bed_val)
+
             ts_rows.append(
                 {
-                    "date": dt,
-                    "revenue": rev_by_date.get(dt, 0.0),
-                    "last_year": None,
-                    "yoy_pct": None,
-                    "mom_pct": None,
-                    "bed_yoy_pct": None,
-                    "bed_mom_pct": None,
-                    "bed_days": bed_by_date.get(dt, 0.0),
+                    "date": d.isoformat(),
+                    "revenue": rev_val,
+                    "last_year": last_rev_val,
+                    "yoy_pct": yoy_pct,
+                    "mom_pct": mom_pct,
+                    "bed_yoy_pct": bed_yoy_pct,
+                    "bed_mom_pct": bed_mom_pct,
                 }
             )
 
-        # 5）details：按当前模式分组
+            prev_rev_val = rev_val
+            prev_bed_val = bed_val
+
+        # ---------- 5）details（三种模式） ----------
+
         detail_rows: List[Dict[str, Any]] = []
 
+        # 把部门名称拼好（医生模式下用于回填科室列）
+        dep_label = None
+        if deps:
+            dep_label = ",".join(deps)
+
         if mode == "doctor":
-            # 医生模式：日期 + 医生 + 项目类
+            # 有医生：日期、科室名（用筛选科室名）、医生名、项目类名、花费(costs)、数量
             agg: Dict[tuple, Dict[str, Any]] = {}
-            for r in base_rows:
-                dt = r.get("rcpt_date")
+            for r in base_rows_cur:
+                dt = _parse_date_str(r.get("rcpt_date"))
+                if not dt:
+                    continue
+                dt_str = dt.isoformat()
                 doc_code = r.get("doc_code")
                 doc_name = r.get("doc_name")
                 item_class = r.get("item_class_name")
-                costs = float(r.get("costs") or 0)
-                amount = float(r.get("amount") or 0)
+                costs = float(r.get("costs") or 0.0)
+                amount = float(r.get("amount") or 0.0)
 
-                key = (dt, doc_code, item_class)
+                key = (dt_str, doc_code, item_class)
                 if key not in agg:
                     agg[key] = {
-                        "date": dt,
+                        "date": dt_str,
+                        "department_name": dep_label,  # 用筛选的科室名回填
                         "doctor_id": doc_code,
                         "doctor_name": doc_name,
                         "item_class_name": item_class,
-                        "revenue": costs,
+                        "cost": costs,
+                        "revenue": costs,  # 保留兼容字段
                         "quantity": amount,
                     }
                 else:
+                    agg[key]["cost"] += costs
                     agg[key]["revenue"] += costs
                     agg[key]["quantity"] += amount
 
@@ -478,27 +634,30 @@ class InpatientTotalRevenueRepository:
             )
         else:
             # 科室模式：
-            # 无科室筛选：按 日期 + 科室 汇总
-            # 有科室筛选：按 日期 + 科室 + 项目类 汇总
+            # - 无科室：日期、科室、收入
+            # - 有科室：日期、科室名、项目类名、收入、数量
             has_deps = bool(deps)
             agg: Dict[tuple, Dict[str, Any]] = {}
 
-            for r in base_rows:
-                dt = r.get("rcpt_date")
+            for r in base_rows_cur:
+                dt = _parse_date_str(r.get("rcpt_date"))
+                if not dt:
+                    continue
+                dt_str = dt.isoformat()
                 dep_code = r.get("dep_code")
                 dep_name = r.get("dep_name")
                 item_class = r.get("item_class_name")
-                charges = float(r.get("charges") or 0)
-                amount = float(r.get("amount") or 0)
+                charges = float(r.get("charges") or 0.0)
+                amount = float(r.get("amount") or 0.0)
 
                 if not has_deps:
-                    key = (dt, dep_code)
+                    key = (dt_str, dep_name)
                 else:
-                    key = (dt, dep_code, item_class)
+                    key = (dt_str, dep_name, item_class)
 
                 if key not in agg:
                     row: Dict[str, Any] = {
-                        "date": dt,
+                        "date": dt_str,
                         "department_code": dep_code,
                         "department_name": dep_name,
                         "revenue": charges,
@@ -510,13 +669,13 @@ class InpatientTotalRevenueRepository:
                 else:
                     agg[key]["revenue"] += charges
                     if has_deps:
-                        agg[key]["quantity"] = (agg[key].get("quantity") or 0) + amount
+                        agg[key]["quantity"] = (agg[key].get("quantity") or 0.0) + amount
 
             detail_rows = sorted(
                 agg.values(),
                 key=lambda x: (
                     x.get("date") or "",
-                    x.get("department_code") or "",
+                    x.get("department_name") or "",
                     x.get("item_class_name") or "",
                 ),
             )
