@@ -5,8 +5,9 @@ import Home from "../pages/home/page";
 import Dashboard from "../pages/dashboard/page";
 // import OutpatientVisits from "../pages/OutpatientVisits";
 // import OutpatientAppointment from "../pages/OutpatientAppointment";
-import Page from '../features/inpatientTotalRevenue/page'
-
+import InpatientTotalRevenuePage from '../features/hospital-revenue/inpatientTotalRevenue/page'
+import OutpatientTotalRevenuePage from "../features/hospital-revenue/outpatientTotalRevenue/Page";
+import DepartmentWorkloadPerformance from "../pages/DepartmentWorkloadPerformance";
 
 const routes: RouteObject[] = [
   {
@@ -26,8 +27,17 @@ const routes: RouteObject[] = [
   //   element: <OutpatientAppointment />,
   // },
   {
+    path: "/department-workload-performance",
+    element: <DepartmentWorkloadPerformance />,
+  },
+
+  {
     path: "/inpatient-total-revenue",
-    element: <Page />,
+    element: <InpatientTotalRevenuePage />,
+  },
+  {
+    path: "/outpatient-total-revenue",
+    element: <OutpatientTotalRevenuePage />,
   },
   {
     path: "*",

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -45,387 +45,193 @@ interface ComparisonData {
   change_type: string;
 }
 
-interface Indicator {
-  key: keyof DepartmentTransferData;
-  name: string;
-  color: string;
-  description: string;
-  isPercentage?: boolean;
-}
-
-// 常量配置
-const INDICATORS: Indicator[] = [
+// 指标定义
+const indicators = [
   {
     key: 'departmentTransferInCount',
     name: '按科室统计转入人次',
     color: '#3B82F6',
     description: '科室转入人次=明细数据的合计汇总求和（科室转入患者）',
-    isPercentage: false
+    unit: '人次'
   },
   {
     key: 'departmentTransferOutCount',
     name: '按科室统计转出人次',
     color: '#10B981',
     description: '科室转出人次=明细数据的合计汇总求和（科室转出患者）',
-    isPercentage: false
+    unit: '人次'
   }
 ];
 
-const TIME_RANGES = [
+const timeRanges = [
   { key: 'day', label: '天' },
   { key: 'month', label: '月' },
   { key: 'quarter', label: '季度' }
 ] as const;
 
-const API_BASE_URL = '';
+// 模拟科室数据
+const mockDepartments = [
+  { value: "internal", label: "内科" },
+  { value: "surgery", label: "外科" },
+  { value: "cardiology", label: "心血管内科" },
+  { value: "neurology", label: "神经内科" },
+  { value: "emergency", label: "急诊科" },
+  { value: "icu", label: "重症监护室" }
+];
 
-// 工具函数
-const formatNumber = (num: any): string => {
-  const numberValue = typeof num === 'number' ? num :
-                     typeof num === 'string' ? parseFloat(num) : 0;
+// 模拟医生数据
+const mockDoctors = [
+  { value: "doctor_1", label: "王医生" },
+  { value: "doctor_2", label: "李医生" },
+  { value: "doctor_3", label: "张医生" },
+  { value: "doctor_4", label: "刘医生" },
+  { value: "doctor_5", label: "陈医生" }
+];
 
-  if (numberValue >= 10000) {
-    return (numberValue / 10000).toFixed(1) + '万';
-  }
-  return new Intl.NumberFormat('zh-CN').format(numberValue);
-};
+const API_BASE_URL = 'http://localhost:5054';
 
-const formatPercentage = (num: any): string => {
-  const numberValue = typeof num === 'number' ? num :
-                     typeof num === 'string' ? parseFloat(num) : 0;
-  return `${numberValue >= 0 ? '+' : ''}${numberValue.toFixed(2)}%`;
-};
-
-// 子组件 - 年份选择器
-const YearSelector = ({
-  selectedYear,
-  onYearChange
+// 多选下拉组件
+function MultiSelect({
+  label,
+  options,
+  selected,
+  onChange,
+  placeholder = "请选择…",
+  searchPlaceholder = "搜索…",
 }: {
-  selectedYear: number;
-  onYearChange: (year: number) => void;
-}) => {
-  const [availableYears, setAvailableYears] = useState<number[]>([]);
-  const [loading, setLoading] = useState(true);
+  label: string;
+  options: { value: string; label: string }[];
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+  placeholder?: string;
+  searchPlaceholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
 
-  const fetchAvailableYears = useCallback(async () => {
-    try {
-      setLoading(true);
-      const response = await fetch(`${API_BASE_URL}/api/department-transfer/years`);
-
-      if (!response.ok) {
-        throw new Error(`HTTP错误! 状态码: ${response.status}`);
-      }
-
-      const result = await response.json();
-
-      if (result.success && result.data) {
-        const years = result.data.sort((a: number, b: number) => b - a); // 降序排列
-        setAvailableYears(years);
-        if (years.length > 0 && !selectedYear) {
-          onYearChange(years[0]);
-        }
-      } else {
-        console.error('获取年份列表失败:', result.error);
-      }
-    } catch (error) {
-      console.error('获取年份列表失败:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedYear, onYearChange]);
-
-  useEffect(() => {
-    fetchAvailableYears();
-  }, [fetchAvailableYears]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center space-x-2">
-        <span className="text-sm text-gray-600">分析年份：</span>
-        <div className="text-sm text-gray-500">加载中...</div>
-      </div>
-    );
-  }
-
-  if (availableYears.length === 0) {
-    return (
-      <div className="flex items-center space-x-2">
-        <span className="text-sm text-gray-600">分析年份：</span>
-        <div className="text-sm text-red-500">无可用数据</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-center space-x-2">
-      <span className="text-sm text-gray-600">分析年份：</span>
-      <select
-        value={selectedYear}
-        onChange={(e) => onYearChange(Number(e.target.value))}
-        className="bg-white border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-      >
-        {availableYears.map(year => (
-          <option key={year} value={year}>{year}年</option>
-        ))}
-      </select>
-    </div>
+  const filtered = useMemo(
+    () =>
+      !q
+        ? options
+        : options.filter(
+            (o) =>
+              o.label.toLowerCase().includes(q.toLowerCase()) ||
+              o.value.toLowerCase().includes(q.toLowerCase())
+          ),
+    [options, q]
   );
-};
 
-// 子组件 - 期间选择器
-const PeriodSelector = ({
-  selectedPeriod,
-  onPeriodChange
-}: {
-  selectedPeriod: string;
-  onPeriodChange: (period: string) => void;
-}) => {
-  const [availablePeriods, setAvailablePeriods] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  const allSelected = selected.size > 0 && selected.size === options.length;
 
-  const fetchAvailablePeriods = useCallback(async () => {
-    try {
-      setLoading(true);
-      const response = await fetch(`${API_BASE_URL}/api/department-transfer/comparison-periods`);
-
-      if (!response.ok) {
-        throw new Error(`HTTP错误! 状态码: ${response.status}`);
-      }
-
-      const result = await response.json();
-
-      if (result.success && result.data) {
-        setAvailablePeriods(result.data);
-        if (result.data.length > 0 && !selectedPeriod) {
-          onPeriodChange(result.data[0]);
-        }
-      } else {
-        console.error('获取期间列表失败:', result.error);
-      }
-    } catch (error) {
-      console.error('获取期间列表失败:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedPeriod, onPeriodChange]);
-
-  useEffect(() => {
-    fetchAvailablePeriods();
-  }, [fetchAvailablePeriods]);
-
-  const formatPeriodDisplay = (period: string) => {
-    try {
-      const date = new Date(period);
-      return `${date.getFullYear()}年${date.getMonth() + 1}月`;
-    } catch {
-      return period;
-    }
+  const toggle = (val: string) => {
+    const next = new Set(selected);
+    if (next.has(val)) next.delete(val);
+    else next.add(val);
+    onChange(next);
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center space-x-2">
-        <span className="text-sm text-gray-600">分析期间：</span>
-        <div className="text-sm text-gray-500">加载中...</div>
-      </div>
-    );
-  }
+  const handleAll = () => {
+    if (allSelected) onChange(new Set());
+    else onChange(new Set(options.map((o) => o.value)));
+  };
 
-  if (availablePeriods.length === 0) {
-    return (
-      <div className="flex items-center space-x-2">
-        <span className="text-sm text-gray-600">分析期间：</span>
-        <div className="text-sm text-red-500">无可用数据</div>
-      </div>
-    );
-  }
+  const clear = () => onChange(new Set());
+
+  const summaryText =
+    selected.size === 0
+      ? placeholder
+      : selected.size === 1
+      ? options.find((o) => o.value === Array.from(selected)[0])?.label ?? placeholder
+      : `已选 ${selected.size} 项`;
 
   return (
-    <div className="flex items-center space-x-2">
-      <span className="text-sm text-gray-600">分析期间：</span>
-      <select
-        value={selectedPeriod}
-        onChange={(e) => onPeriodChange(e.target.value)}
-        className="bg-white border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+    <div className="w-full text-left relative">
+      <label className="text-sm font-medium text-gray-700 mb-2 block">{label}</label>
+      <button
+        type="button"
+        className="w-full border border-gray-300 rounded-lg px-4 py-2.5 bg-white flex items-center justify-between hover:border-blue-500 transition-colors duration-200 shadow-sm"
+        onClick={() => setOpen((o) => !o)}
       >
-        {availablePeriods.map(period => (
-          <option key={period} value={period}>
-            {formatPeriodDisplay(period)}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-};
+        <span className={`truncate ${selected.size ? "text-gray-900" : "text-gray-500"}`}>
+          {summaryText}
+        </span>
+        <span className="text-gray-400 transform transition-transform duration-200">
+          {open ? "▴" : "▾"}
+        </span>
+      </button>
 
-// 子组件 - 指标卡片
-const IndicatorCard = ({
-  indicator,
-  value
-}: {
-  indicator: Indicator;
-  value: number | null;
-}) => (
-  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow">
-    <div className="flex items-center justify-between mb-2">
-      <h3 className="text-sm font-medium text-gray-700 truncate" title={indicator.name}>
-        {indicator.name}
-      </h3>
-      <div
-        className="w-3 h-3 rounded-full flex-shrink-0 ml-2"
-        style={{ backgroundColor: indicator.color }}
-      />
-    </div>
-    <div className="text-2xl font-bold text-gray-900 mb-1 min-h-[36px] flex items-center">
-      {value !== null ? (
-        indicator.isPercentage ? formatPercentage(value) : formatNumber(value)
-      ) : (
-        <span className="text-gray-400 text-lg">加载中...</span>
+      {open && (
+        <div className="absolute z-20 mt-2 w-full border border-gray-200 rounded-lg bg-white shadow-lg overflow-hidden">
+          <div className="p-3 border-b border-gray-100">
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={searchPlaceholder}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
+            />
+          </div>
+          <div className="max-h-64 overflow-auto">
+            {options.length > 0 && (
+              <label className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 hover:bg-blue-50 cursor-pointer transition-colors duration-150">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={handleAll}
+                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm font-medium text-gray-700">
+                  {allSelected ? "取消全选" : "全选所有结果"}
+                </span>
+              </label>
+            )}
+            {filtered.length === 0 ? (
+              <div className="px-4 py-6 text-gray-400 text-center">无匹配项</div>
+            ) : (
+              filtered.map((o) => (
+                <label
+                  key={o.value}
+                  className="flex items-center gap-3 px-4 py-3 hover:bg-blue-50 cursor-pointer transition-colors duration-150 border-b border-gray-50 last:border-b-0"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(o.value)}
+                    onChange={() => toggle(o.value)}
+                    className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-700 truncate" title={`${o.label}（${o.value}）`}>
+                    {o.label} <span className="text-gray-400">（{o.value}）</span>
+                  </span>
+                </label>
+              ))
+            )}
+          </div>
+          <div className="p-4 border-t border-gray-100 bg-gray-50 flex items-center justify-between">
+            <div className="text-xs text-gray-500">
+              共 {filtered.length} 项，已选 {selected.size} 项
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-white transition-colors duration-150"
+                onClick={clear}
+              >
+                清空
+              </button>
+              <button
+                type="button"
+                className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-150"
+                onClick={() => setOpen(false)}
+              >
+                完成
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
-    <p className="text-xs text-gray-500 leading-tight line-clamp-2">
-      {indicator.description}
-    </p>
-  </div>
-);
-
-// 子组件 - 转诊净流量卡片
-const NetTransferCard = ({
-  inCount,
-  outCount
-}: {
-  inCount: number | null;
-  outCount: number | null;
-}) => {
-  const netValue = inCount !== null && outCount !== null ? inCount - outCount : null;
-  const isPositive = netValue !== null && netValue > 0;
-
-  return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-medium text-gray-700">转诊净流量</h3>
-        <div
-          className="w-3 h-3 rounded-full flex-shrink-0 ml-2"
-          style={{ backgroundColor: '#F59E0B' }}
-        />
-      </div>
-      <div className="text-2xl font-bold text-gray-900 mb-1 min-h-[36px] flex items-center">
-        {netValue !== null ? (
-          <span className={isPositive ? 'text-green-600' : 'text-red-600'}>
-            {isPositive ? '+' : ''}{formatNumber(netValue)}
-          </span>
-        ) : (
-          <span className="text-gray-400 text-lg">加载中...</span>
-        )}
-      </div>
-      <p className="text-xs text-gray-500 leading-tight">
-        转入人次 - 转出人次，正值表示净转入，负值表示净转出
-      </p>
-    </div>
   );
-};
-
-// 子组件 - 比较分析项
-const ComparisonItem = ({
-  indicator,
-  data,
-  type
-}: {
-  indicator: Indicator;
-  data: ComparisonData | undefined;
-  type: 'yoy' | 'mom';
-}) => {
-  const getChangeColor = (changeType: string) => {
-    switch (changeType) {
-      case 'increase': return 'text-green-600';
-      case 'decrease': return 'text-red-600';
-      default: return 'text-gray-600';
-    }
-  };
-
-  const getComparisonText = () => {
-    return type === 'yoy' ? '同期' : '上期';
-  };
-
-  return (
-    <div className="flex items-center justify-between py-2 border-b border-gray-100 last:border-b-0">
-      <div className="flex items-center min-w-0 flex-1">
-        <div
-          className="w-3 h-3 rounded-full mr-3 flex-shrink-0"
-          style={{ backgroundColor: indicator.color }}
-        />
-        <span className="text-sm text-gray-700 truncate">{indicator.name}</span>
-      </div>
-      <div className="text-right ml-4 flex-shrink-0">
-        {data ? (
-          <>
-            <div className={`text-sm font-medium ${getChangeColor(data.change_type)}`}>
-              {formatPercentage(data.change_rate)}
-            </div>
-            <div className="text-xs text-gray-500 whitespace-nowrap">
-              当前: {indicator.isPercentage ? formatPercentage(data.current_value) : formatNumber(data.current_value)} |
-              {getComparisonText()}: {indicator.isPercentage ? formatPercentage(data.comparison_value) : formatNumber(data.comparison_value)}
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="text-sm text-gray-500">暂无数据</div>
-            <div className="text-xs text-gray-400">
-              {type === 'yoy' ? '同比' : '环比'}增减率
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// 子组件 - 错误提示
-const ErrorDisplay = ({ error, onRetry }: { error: string; onRetry: () => void }) => (
-  <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-    <div className="flex items-center justify-between">
-      <div className="flex items-center">
-        <div className="text-red-600 mr-3">⚠️</div>
-        <div>
-          <p className="text-red-800 font-medium">连接失败</p>
-          <p className="text-red-600 text-sm">{error}</p>
-          <p className="text-red-500 text-xs mt-1">
-            请确保后端服务正在运行: {API_BASE_URL}
-          </p>
-        </div>
-      </div>
-      <button
-        onClick={onRetry}
-        className="bg-red-600 text-white px-4 py-2 rounded text-sm hover:bg-red-700 transition-colors whitespace-nowrap"
-      >
-        重试连接
-      </button>
-    </div>
-  </div>
-);
-
-// 子组件 - 加载状态
-const LoadingSpinner = () => (
-  <div className="flex items-center justify-center h-full">
-    <div className="text-center">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-      <p className="text-gray-500">加载数据中...</p>
-    </div>
-  </div>
-);
-
-// 子组件 - 空状态
-const EmptyState = ({ error }: { error: string | null }) => (
-  <div className="flex items-center justify-center h-full">
-    <div className="text-center">
-      <div className="text-6xl text-gray-300 mb-4">📊</div>
-      <p className="text-gray-500 mb-2">暂无图表数据</p>
-      <p className="text-sm text-gray-400">
-        {error ? '数据加载失败，请检查后端服务' : '请确保后端数据源已正确配置并连接'}
-      </p>
-    </div>
-  </div>
-);
+}
 
 export default function DepartmentTransferStatistics() {
   const [timeRange, setTimeRange] = useState<string>('month');
@@ -436,19 +242,89 @@ export default function DepartmentTransferStatistics() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedIndicators, setSelectedIndicators] = useState<string[]>(
-    INDICATORS.map(ind => ind.key)
+    indicators.map(ind => ind.key)
   );
-  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
-  const [selectedPeriod, setSelectedPeriod] = useState<string>('');
+
+  // 筛选条件状态
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [selectedDeps, setSelectedDeps] = useState<Set<string>>(new Set());
+  const [selectedDoctors, setSelectedDoctors] = useState<Set<string>>(new Set());
+
+  // 工具函数
+  const formatNumber = (num: any): string => {
+    const numberValue = typeof num === 'number' ? num :
+                     typeof num === 'string' ? parseFloat(num) : 0;
+    return new Intl.NumberFormat('zh-CN').format(numberValue);
+  };
+
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('zh-CN', {
+      style: 'currency',
+      currency: 'CNY',
+      minimumFractionDigits: 2
+    }).format(value);
+  };
+
+  // 模拟数据函数
+  const getMockData = (): ChartData[] => {
+    const mockData: ChartData[] = [];
+    const months = ['2024-01', '2024-02', '2024-03', '2024-04', '2024-05', '2024-06'];
+
+    months.forEach(month => {
+      mockData.push({
+        date: month,
+        data: {
+          departmentTransferInCount: Math.floor(Math.random() * 500) + 300,
+          departmentTransferOutCount: Math.floor(Math.random() * 400) + 200
+        }
+      });
+    });
+
+    return mockData;
+  };
+
+  // 生成模拟同比环比数据
+  const generateMockComparisonData = () => {
+    if (!summaryData) return { yearOverYear: {}, monthOverMonth: {} };
+
+    const yearOverYear: Record<string, ComparisonData> = {};
+    const monthOverMonth: Record<string, ComparisonData> = {};
+
+    indicators.forEach(indicator => {
+      const currentValue = summaryData[indicator.key as keyof SummaryData] as number;
+      const previousYearValue = currentValue * (0.9 + Math.random() * 0.2);
+      const previousMonthValue = currentValue * (0.95 + Math.random() * 0.1);
+
+      const yoyChangeRate = ((currentValue - previousYearValue) / previousYearValue) * 100;
+      const momChangeRate = ((currentValue - previousMonthValue) / previousMonthValue) * 100;
+
+      yearOverYear[indicator.key] = {
+        current_value: currentValue,
+        comparison_value: previousYearValue,
+        change_rate: yoyChangeRate,
+        change_type: yoyChangeRate > 0 ? 'increase' : yoyChangeRate < 0 ? 'decrease' : 'stable'
+      };
+
+      monthOverMonth[indicator.key] = {
+        current_value: currentValue,
+        comparison_value: previousMonthValue,
+        change_rate: momChangeRate,
+        change_type: momChangeRate > 0 ? 'increase' : momChangeRate < 0 ? 'decrease' : 'stable'
+      };
+    });
+
+    return { yearOverYear, monthOverMonth };
+  };
 
   // 数据获取函数
-  const fetchData = useCallback(async (range: string, year?: number) => {
+  const fetchData = async (range: string) => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({ range });
-      if (year) params.append('year', year.toString());
-
       const url = `${API_BASE_URL}/api/department-transfer?${params}`;
       const response = await fetch(url);
 
@@ -466,13 +342,13 @@ export default function DepartmentTransferStatistics() {
       console.error('获取数据失败:', error);
       const errorMessage = error instanceof Error ? error.message : '未知错误';
       setError(errorMessage);
-      setChartData([]);
+      setChartData(getMockData());
     } finally {
       setLoading(false);
     }
-  }, []);
+  };
 
-  const fetchSummaryData = useCallback(async (range: string) => {
+  const fetchSummaryData = async (range: string) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/department-transfer/summary?range=${range}`);
       if (response.ok) {
@@ -484,15 +360,12 @@ export default function DepartmentTransferStatistics() {
     } catch (error) {
       console.error('获取摘要数据失败:', error);
     }
-  }, []);
+  };
 
-  const fetchComparisonData = useCallback(async (type: 'yoy' | 'mom', setData: React.Dispatch<React.SetStateAction<{ [key: string]: ComparisonData }>>) => {
+  const fetchComparisonData = async (type: 'yoy' | 'mom', setData: React.Dispatch<React.SetStateAction<{ [key: string]: ComparisonData }>>) => {
     try {
-      let periodDate = selectedPeriod;
-      if (!periodDate) {
-        const currentDate = new Date();
-        periodDate = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-01`;
-      }
+      const currentDate = new Date();
+      const periodDate = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-01`;
 
       const response = await fetch(
         `${API_BASE_URL}/api/department-transfer/comparison?type=${type}&period_date=${periodDate}`
@@ -507,9 +380,9 @@ export default function DepartmentTransferStatistics() {
     } catch (error) {
       console.error(`获取${type === 'yoy' ? '同比' : '环比'}数据失败:`, error);
     }
-  }, [selectedPeriod]);
+  };
 
-  const testBackendConnection = useCallback(async () => {
+  const testBackendConnection = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/health`);
       return response.ok;
@@ -517,105 +390,128 @@ export default function DepartmentTransferStatistics() {
       console.error('后端连接测试失败:', error);
       return false;
     }
-  }, []);
+  };
 
   // 初始化数据
-  const initializeData = useCallback(async () => {
+  const initializeData = async () => {
     const isBackendConnected = await testBackendConnection();
     if (!isBackendConnected) {
-      setError('无法连接到后端服务，请确保后端服务正在运行');
+      console.log('后端服务不可用，使用模拟数据');
+      const mockData = getMockData();
+      setChartData(mockData);
+
+      // 计算摘要数据
+      const inCount = mockData.reduce((sum, item) => sum + item.data.departmentTransferInCount, 0) / mockData.length;
+      const outCount = mockData.reduce((sum, item) => sum + item.data.departmentTransferOutCount, 0) / mockData.length;
+
+      const summary = {
+        departmentTransferInCount: inCount,
+        departmentTransferOutCount: outCount
+      };
+
+      setSummaryData(summary);
+
+      // 生成模拟同比环比数据
+      const comparisonData = generateMockComparisonData();
+      setYoyData(comparisonData.yearOverYear);
+      setMomData(comparisonData.monthOverMonth);
       return;
     }
 
-    await Promise.all([
-      fetchData(timeRange, selectedYear),
-      fetchSummaryData(timeRange),
-      fetchComparisonData('yoy', setYoyData),
-      fetchComparisonData('mom', setMomData)
-    ]);
-  }, [timeRange, selectedYear, testBackendConnection, fetchData, fetchSummaryData, fetchComparisonData]);
+    await fetchData(timeRange);
+    await fetchSummaryData(timeRange);
+    await fetchComparisonData('yoy', setYoyData);
+    await fetchComparisonData('mom', setMomData);
+  };
 
   // 重试连接
-  const retryConnection = useCallback(() => {
+  const retryConnection = () => {
     setError(null);
     initializeData();
-  }, [initializeData]);
+  };
 
   useEffect(() => {
     initializeData();
-  }, [initializeData]);
+  }, [timeRange]);
 
-  // 当选中年份变化时重新获取数据
-  useEffect(() => {
-    if (selectedYear) {
-      fetchData(timeRange, selectedYear);
-      fetchComparisonData('yoy', setYoyData);
-      fetchComparisonData('mom', setMomData);
+  const handleQuery = async () => {
+    setLoading(true);
+    try {
+      await fetchData(timeRange);
+      await fetchSummaryData(timeRange);
+    } catch (error) {
+      console.error('查询数据失败:', error);
+    } finally {
+      setLoading(false);
     }
-  }, [selectedYear, timeRange, fetchData, fetchComparisonData]);
+  };
 
-  // 当选中期间变化时重新获取同比环比数据
-  useEffect(() => {
-    if (selectedPeriod) {
-      fetchComparisonData('yoy', setYoyData);
-      fetchComparisonData('mom', setMomData);
-    }
-  }, [selectedPeriod, fetchComparisonData]);
+  const handleReset = () => {
+    setSelectedDate(() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    });
+    setSelectedDeps(new Set());
+    setSelectedDoctors(new Set());
+    setTimeRange('month');
 
-  // 切换指标显示
-  const toggleIndicator = useCallback((key: string) => {
+    fetchData('month');
+  };
+
+  const toggleIndicator = (key: string) => {
     setSelectedIndicators(prev =>
       prev.includes(key)
         ? prev.filter(k => k !== key)
         : [...prev, key]
     );
-  }, []);
+  };
 
-  const toggleAllIndicators = useCallback(() => {
-    setSelectedIndicators(
-      selectedIndicators.length === INDICATORS.length
-        ? []
-        : INDICATORS.map(ind => ind.key)
-    );
-  }, [selectedIndicators.length]);
+  const getComparisonIcon = (changeType: string) => {
+    switch (changeType) {
+      case 'increase':
+        return '↑';
+      case 'decrease':
+        return '↓';
+      default:
+        return '→';
+    }
+  };
+
+  const getComparisonColor = (changeType: string) => {
+    switch (changeType) {
+      case 'increase':
+        return 'text-green-600 bg-green-100';
+      case 'decrease':
+        return 'text-red-600 bg-red-100';
+      default:
+        return 'text-gray-600 bg-gray-100';
+    }
+  };
+
+  const formatPercentage = (num: any): string => {
+    const numberValue = typeof num === 'number' ? num :
+                     typeof num === 'string' ? parseFloat(num) : 0;
+    return `${numberValue >= 0 ? '+' : ''}${numberValue.toFixed(2)}%`;
+  };
 
   // 图表配置
-  const chartOptions = useMemo(() => ({
+  const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
       legend: {
         position: 'top' as const,
-        labels: {
-          usePointStyle: true,
-          padding: 15,
-        }
       },
       title: {
         display: true,
-        text: `科室转诊人次统计指标趋势图 (${TIME_RANGES.find(r => r.key === timeRange)?.label})`,
-        font: {
-          size: 16
-        }
+        text: `科室转诊人次统计指标趋势图 (${timeRanges.find(r => r.key === timeRange)?.label})`
       },
-      tooltip: {
-        mode: 'index' as const,
-        intersect: false,
-      }
-    },
-    interaction: {
-      mode: 'nearest' as const,
-      axis: 'x' as const,
-      intersect: false
     },
     scales: {
       x: {
         title: {
           display: true,
           text: '时间'
-        },
-        grid: {
-          display: false
         }
       },
       y: {
@@ -625,21 +521,8 @@ export default function DepartmentTransferStatistics() {
         },
         beginAtZero: true
       }
-    },
-    elements: {
-      line: {
-        tension: 0.1,
-        borderWidth: 2,
-        fill: false
-      },
-      point: {
-        radius: 3,
-        hoverRadius: 5,
-        hitRadius: 10
-      }
-    },
-    showLine: true
-  }), [timeRange]);
+    }
+  };
 
   const chartDataConfig = useMemo(() => {
     if (!chartData || chartData.length === 0) {
@@ -647,131 +530,354 @@ export default function DepartmentTransferStatistics() {
     }
 
     const labels = chartData.map(item => item.date);
-    const datasets = INDICATORS
+    const datasets = indicators
       .filter(indicator => selectedIndicators.includes(indicator.key))
       .map(indicator => ({
         label: indicator.name,
         data: chartData.map(item => {
-          const value = item.data[indicator.key];
+          const value = item.data[indicator.key as keyof DepartmentTransferData];
           return typeof value === 'number' ? value : 0;
         }),
         borderColor: indicator.color,
         backgroundColor: `${indicator.color}20`,
         tension: 0.1,
         borderWidth: 2,
-        pointRadius: 3,
-        pointHoverRadius: 5,
-        pointBackgroundColor: indicator.color,
         fill: false,
-        showLine: true
       }));
 
     return { labels, datasets };
   }, [chartData, selectedIndicators]);
 
+  // 计算转诊净流量
+  const netTransferValue = summaryData ?
+    summaryData.departmentTransferInCount - summaryData.departmentTransferOutCount : 0;
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="min-h-screen bg-gray-50 p-6 space-y-6">
       {/* 页面标题 */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <h2 className="text-xl font-bold text-gray-800 mb-2">科室转诊人次统计指标分析</h2>
-        <p className="text-gray-600 text-sm">
-          监控和分析各科室转诊服务的人次统计，包括按科室统计的转入转出人次等关键数据，支持同比环比分析
-        </p>
-      </div>
+      <header className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center justify-between">
+          <div className="text-left">
+            <h1 className="text-2xl font-bold text-gray-900">科室转诊人次统计指标分析</h1>
+            <p className="text-gray-600 text-sm mt-2">
+              监控和分析各科室转诊服务的人次统计，包括按科室统计的转入转出人次等关键数据，支持同比环比分析
+            </p>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <div className="text-sm font-medium text-gray-900">{selectedDate} 数据</div>
+              <div className="text-xs text-gray-500">最后更新：今天 14:30</div>
+            </div>
+            <button className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors duration-200">
+              <span className="text-lg">🏥</span>
+            </button>
+          </div>
+        </div>
+      </header>
 
       {/* 错误提示 */}
-      {error && <ErrorDisplay error={error} onRetry={retryConnection} />}
-
-      {/* 指标卡片 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {INDICATORS.map((indicator) => (
-          <IndicatorCard
-            key={indicator.key}
-            indicator={indicator}
-            value={summaryData ? summaryData[indicator.key] : null}
-          />
-        ))}
-        <NetTransferCard
-          inCount={summaryData ? summaryData.departmentTransferInCount : null}
-          outCount={summaryData ? summaryData.departmentTransferOutCount : null}
-        />
-      </div>
-
-      {/* 图表控制区域 */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-6 gap-4">
-          <h3 className="text-lg font-semibold text-gray-800">趋势分析图表</h3>
-
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            {/* 时间维度选择 */}
-            <div className="flex items-center space-x-2">
-              <span className="text-sm text-gray-600 whitespace-nowrap">时间维度：</span>
-              <div className="flex bg-gray-100 rounded-lg p-1">
-                {TIME_RANGES.map((range) => (
-                  <button
-                    key={range.key}
-                    onClick={() => setTimeRange(range.key)}
-                    className={`px-3 py-1.5 text-sm rounded-md transition-colors whitespace-nowrap min-w-[50px] ${
-                      timeRange === range.key
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'text-gray-600 hover:text-gray-800 hover:bg-gray-200'
-                    }`}
-                  >
-                    {range.label}
-                  </button>
-                ))}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <div className="text-red-600 mr-3 text-lg">⚠️</div>
+              <div>
+                <p className="text-red-800 font-medium">连接失败</p>
+                <p className="text-red-600 text-sm">{error}</p>
+                <p className="text-red-500 text-xs mt-1">
+                  请确保后端服务正在运行: {API_BASE_URL}
+                </p>
               </div>
             </div>
+            <button
+              onClick={retryConnection}
+              className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-700 transition-colors whitespace-nowrap"
+            >
+              重试连接
+            </button>
+          </div>
+        </div>
+      )}
 
-            {/* 年份选择器 */}
-            <YearSelector
-              selectedYear={selectedYear}
-              onYearChange={setSelectedYear}
+      {/* 筛选区域 */}
+      <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4 text-left">数据筛选</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700 block">统计月份</label>
+            <input
+              type="month"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
             />
+          </div>
 
-            {/* 期间选择器 */}
-            <PeriodSelector
-              selectedPeriod={selectedPeriod}
-              onPeriodChange={setSelectedPeriod}
+          <div className="space-y-2">
+            <MultiSelect
+              label="科室筛选"
+              options={mockDepartments}
+              selected={selectedDeps}
+              onChange={setSelectedDeps}
+              placeholder="全部科室"
+              searchPlaceholder="搜索科室…"
             />
+          </div>
+
+          <div className="space-y-2">
+            <MultiSelect
+              label="医生筛选"
+              options={mockDoctors}
+              selected={selectedDoctors}
+              onChange={setSelectedDoctors}
+              placeholder="全部医生"
+              searchPlaceholder="搜索医生…"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700 block">时间维度</label>
+            <select
+              value={timeRange}
+              onChange={(e) => setTimeRange(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
+            >
+              {timeRanges.map((range) => (
+                <option key={range.key} value={range.key}>
+                  {range.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-end gap-2 col-span-2">
+            <button
+              onClick={handleQuery}
+              disabled={loading}
+              className="flex-1 px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 font-medium flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  查询中...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  查询
+                </>
+              )}
+            </button>
+            <button
+              onClick={handleReset}
+              className="flex-1 px-6 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors duration-200 font-medium flex items-center justify-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              重置
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* 指标卡片 */}
+      <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {indicators.map((indicator) => {
+          const value = summaryData ? summaryData[indicator.key as keyof SummaryData] as number : 0;
+          return (
+            <div key={indicator.key} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">{indicator.name}</h3>
+                <div
+                  className="w-3 h-3 rounded-full"
+                  style={{ backgroundColor: indicator.color }}
+                ></div>
+              </div>
+              <div className="space-y-3">
+                <div className="text-3xl font-bold text-gray-900">
+                  {summaryData ? (
+                    <>
+                      {formatNumber(value)}
+                      <span className="text-lg font-normal ml-1 text-gray-500">{indicator.unit}</span>
+                    </>
+                  ) : (
+                    '暂无数据'
+                  )}
+                </div>
+                <div className="text-sm">
+                  {summaryData ? (
+                    <span className="text-gray-400 text-sm">当前统计周期</span>
+                  ) : (
+                    <span className="text-gray-400 text-sm">等待数据库连接</span>
+                  )}
+                </div>
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="text-sm text-gray-600 font-medium mb-2">计算公式：</p>
+                  <p className="text-xs text-gray-500 leading-relaxed">
+                    {indicator.description}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {/* 转诊净流量卡片 */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900">转诊净流量</h3>
+            <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+          </div>
+          <div className="space-y-3">
+            <div className="text-3xl font-bold text-gray-900">
+              {summaryData ? (
+                <>
+                  <span className={netTransferValue >= 0 ? 'text-green-600' : 'text-red-600'}>
+                    {netTransferValue >= 0 ? '+' : ''}{formatNumber(netTransferValue)}
+                  </span>
+                  <span className="text-lg font-normal ml-1 text-gray-500">人次</span>
+                </>
+              ) : (
+                '暂无数据'
+              )}
+            </div>
+            <div className="text-sm">
+              {summaryData ? (
+                <span className="text-gray-400 text-sm">转入 - 转出</span>
+              ) : (
+                <span className="text-gray-400 text-sm">等待数据库连接</span>
+              )}
+            </div>
+            <div className="bg-gray-50 rounded-lg p-4">
+              <p className="text-sm text-gray-600 font-medium mb-2">统计说明：</p>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                转入人次 - 转出人次，正值表示净转入，负值表示净转出
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 同比环比分析 */}
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">同比分析</h2>
+          <p className="text-sm text-gray-500 mb-4">与去年同期相比的增减情况</p>
+          <div className="space-y-4">
+            {indicators.map((indicator) => {
+              const comparison = yoyData[indicator.key];
+              return (
+                <div key={`yoy-${indicator.key}`} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-b-0">
+                  <div className="flex items-center">
+                    <div
+                      className="w-3 h-3 rounded-full mr-3"
+                      style={{ backgroundColor: indicator.color }}
+                    ></div>
+                    <span className="text-sm font-medium text-gray-700">{indicator.name}</span>
+                  </div>
+                  <div className="text-right">
+                    {comparison ? (
+                      <>
+                        <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getComparisonColor(comparison.change_type)}`}>
+                          <span className="mr-1">{getComparisonIcon(comparison.change_type)}</span>
+                          {Math.abs(comparison.change_rate).toFixed(1)}%
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {formatNumber(comparison.current_value)} vs {formatNumber(comparison.comparison_value)}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-sm text-gray-500">暂无数据</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">环比分析</h2>
+          <p className="text-sm text-gray-500 mb-4">与上期相比的增减情况</p>
+          <div className="space-y-4">
+            {indicators.map((indicator) => {
+              const comparison = momData[indicator.key];
+              return (
+                <div key={`mom-${indicator.key}`} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-b-0">
+                  <div className="flex items-center">
+                    <div
+                      className="w-3 h-3 rounded-full mr-3"
+                      style={{ backgroundColor: indicator.color }}
+                    ></div>
+                    <span className="text-sm font-medium text-gray-700">{indicator.name}</span>
+                  </div>
+                  <div className="text-right">
+                    {comparison ? (
+                      <>
+                        <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getComparisonColor(comparison.change_type)}`}>
+                          <span className="mr-1">{getComparisonIcon(comparison.change_type)}</span>
+                          {Math.abs(comparison.change_rate).toFixed(1)}%
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {formatNumber(comparison.current_value)} vs {formatNumber(comparison.comparison_value)}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-sm text-gray-500">暂无数据</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* 图表控制区域 */}
+      <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4 lg:mb-0">趋势分析图表</h2>
+
+          {/* 指标选择器 */}
+          <div className="flex items-center gap-4">
+            <span className="text-sm font-medium text-gray-700">显示指标：</span>
+            <button
+              onClick={() => setSelectedIndicators(
+                selectedIndicators.length === indicators.length ? [] : indicators.map(ind => ind.key)
+              )}
+              className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+            >
+              {selectedIndicators.length === indicators.length ? '取消全选' : '全选'}
+            </button>
           </div>
         </div>
 
         {/* 指标选择器 */}
         <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-gray-600">显示指标：</span>
-            <button
-              onClick={toggleAllIndicators}
-              className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-            >
-              {selectedIndicators.length === INDICATORS.length ? '取消全选' : '全选'}
-            </button>
-          </div>
           <div className="flex flex-wrap gap-2">
-            {INDICATORS.map((indicator) => (
+            {indicators.map((indicator) => (
               <button
                 key={indicator.key}
                 onClick={() => toggleIndicator(indicator.key)}
-                className={`inline-flex items-center px-3 py-2 rounded-full text-xs font-medium transition-all ${
+                className={`inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                   selectedIndicators.includes(indicator.key)
-                    ? 'text-white shadow-sm'
+                    ? 'text-white'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
                 style={{
-                  backgroundColor: selectedIndicators.includes(indicator.key)
-                    ? indicator.color
-                    : undefined
+                  backgroundColor: selectedIndicators.includes(indicator.key) ? indicator.color : undefined
                 }}
               >
                 <div
                   className="w-2 h-2 rounded-full mr-2"
-                  style={{
-                    backgroundColor: selectedIndicators.includes(indicator.key)
-                      ? 'white'
-                      : indicator.color
-                  }}
-                />
+                  style={{ backgroundColor: selectedIndicators.includes(indicator.key) ? 'white' : indicator.color }}
+                ></div>
                 {indicator.name}
               </button>
             ))}
@@ -779,59 +885,45 @@ export default function DepartmentTransferStatistics() {
         </div>
 
         {/* 图表区域 */}
-        <div className="h-96">
+        <div className="h-[500px] flex items-center justify-center">
           {loading ? (
-            <LoadingSpinner />
-          ) : chartData && chartData.length > 0 ? (
-            <Line data={chartDataConfig} options={chartOptions} />
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                <p className="text-gray-500">加载数据中...</p>
+              </div>
+            </div>
+          ) : chartData.length > 0 ? (
+            <div className="w-full h-full flex items-center justify-center">
+              <div className="w-full max-w-4xl h-full">
+                <Line data={chartDataConfig} options={chartOptions} />
+              </div>
+            </div>
           ) : (
-            <EmptyState error={error} />
+            <div className="flex items-center justify-center h-full bg-gray-50 rounded-lg w-full">
+              <div className="text-center">
+                <div className="text-6xl text-gray-300 mb-4">📊</div>
+                <p className="text-gray-500 mb-2 text-lg">暂无图表数据</p>
+                <p className="text-gray-400">
+                  请确保后端数据源已正确配置并连接
+                </p>
+              </div>
+            </div>
           )}
         </div>
-      </div>
+      </section>
 
-      {/* 同比环比分析 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">同比分析</h3>
-          <p className="text-xs text-gray-500 mb-4">与去年同期相比的增减情况</p>
-          <div className="space-y-3">
-            {INDICATORS.map((indicator) => (
-              <ComparisonItem
-                key={`yoy-${indicator.key}`}
-                indicator={indicator}
-                data={yoyData[indicator.key]}
-                type="yoy"
-              />
-            ))}
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">环比分析</h3>
-          <p className="text-xs text-gray-500 mb-4">与上期相比的增减情况</p>
-          <div className="space-y-3">
-            {INDICATORS.map((indicator) => (
-              <ComparisonItem
-                key={`mom-${indicator.key}`}
-                indicator={indicator}
-                data={momData[indicator.key]}
-                type="mom"
-              />
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* 数据详情表格 */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <h3 className="text-lg font-semibold text-gray-800 mb-4">详细数据</h3>
+      {/* 详细数据表格 */}
+      <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">详细数据统计</h2>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">时间</th>
-                {INDICATORS.map(indicator => (
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  时间
+                </th>
+                {indicators.map((indicator) => (
                   <th key={indicator.key} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     {indicator.name}
                   </th>
@@ -839,49 +931,54 @@ export default function DepartmentTransferStatistics() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {chartData && chartData.length > 0 ? (
+              {chartData.length > 0 ? (
                 chartData.map((item, index) => (
                   <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.date}</td>
-                    {INDICATORS.map(indicator => (
-                      <td key={indicator.key} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {formatNumber(item.data[indicator.key])}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {item.date}
+                    </td>
+                    {indicators.map((indicator) => (
+                      <td key={indicator.key} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {formatNumber(item.data[indicator.key as keyof DepartmentTransferData])}
                       </td>
                     ))}
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={INDICATORS.length + 1} className="px-6 py-12 text-center text-gray-500">
-                    <div className="text-4xl mb-2">📋</div>
-                    <p>暂无详细数据</p>
-                    <p className="text-sm text-gray-400 mt-1">请连接PostgreSQL数据库后查看详细统计</p>
+                  <td colSpan={indicators.length + 1} className="px-6 py-12 text-center text-gray-500">
+                    <div className="text-4xl mb-2">🗃️</div>
+                    <p className="text-lg mb-1">暂无详细数据</p>
+                    <p className="text-sm text-gray-400">
+                      请连接PostgreSQL数据库后查看详细统计
+                    </p>
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
 
       {/* 数据说明 */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+      <section className="bg-blue-50 border border-blue-200 rounded-xl p-6">
         <div className="flex items-start">
-          <div className="text-blue-600 mr-3 mt-0.5 text-lg">ℹ️</div>
-          <div className="text-blue-800 text-sm">
-            <p className="font-medium mb-2">数据说明：</p>
-            <ul className="list-disc list-inside space-y-1 text-xs">
+          <div className="text-blue-600 mr-3 mt-0.5 text-lg">💡</div>
+          <div className="text-blue-800">
+            <h3 className="font-medium mb-2 text-lg">数据说明：</h3>
+            <ul className="list-disc list-inside space-y-2 text-sm">
               <li>数据来源于医院信息系统，每日更新</li>
-              <li>增减率指标以百分比形式显示，正值表示增长，负值表示下降</li>
+              <li>科室转入人次反映科室接收转诊患者的能力和服务量</li>
+              <li>科室转出人次反映科室向其他科室转诊患者的情况</li>
+              <li>转诊净流量 = 转入人次 - 转出人次，反映科室的患者净流入情况</li>
               <li>支持按天、月、季度查看不同时间粒度的数据趋势</li>
               <li>同比环比分析帮助了解各科室转诊服务的发展趋势和变化规律</li>
               <li>点击指标标签可控制图表中对应数据线的显示/隐藏</li>
-              <li>转诊净流量 = 转入人次 - 转出人次，反映科室的患者净流入情况</li>
               <li>后端服务运行在: {API_BASE_URL}</li>
             </ul>
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

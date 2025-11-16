@@ -1,8 +1,9 @@
 import logging
 from flask import Flask, jsonify
-from app.routes.inpatient_total_revenue_routes import bp as inpatient_total_revenue_bp
+from backend.app.features.hospital_revenue.inpatient_total_revenue.inpatient_total_revenue_route import bp as inpatient_total_revenue_bp
 from app.department_workload_performance import bp as department_workload_performance_bp  # ⭐ 新增
-from app.utils.db import init_db
+from app.routes.outpatient_total_revenue_routes import bp as outpatient_total_revenue_bp
+from backend.app.shared.db import init_db
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,6 +27,7 @@ def create_app():
     # 所以这里只用 register_blueprint，不要再传 url_prefix，避免重复 /api/api/...
     app.register_blueprint(department_workload_performance_bp, url_prefix="/api/department_workload_performance", )
 
+    app.register_blueprint(outpatient_total_revenue_bp, url_prefix="/api/outpatient-total-revenue")
     for rule in app.url_map.iter_rules():
         methods = ",".join(sorted(rule.methods - {"HEAD", "OPTIONS"}))
         print(f"[ROUTE] {rule.rule}  [{methods}] -> {rule.endpoint}")

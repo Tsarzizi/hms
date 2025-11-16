@@ -3,8 +3,6 @@ import { useLocation } from 'react-router-dom';
 import Sidebar from '../../components/base/Sidebar';
 import DataCard from '../../components/base/DataCard';
 
-// import OutpatientVisits from '../../../medical-services/outpatient-emergency/outpatient-visits';
-// import OutpatientAppointment from '../../../medical-services/outpatient-emergency/outpatient-appointment';
 import OutpatientVisits from '../outpatient-visits';
 import OutpatientAppointment from '../outpatient-appointment';
 import TcmService from '../tcm-service.tsx';
@@ -116,18 +114,17 @@ import InpatientInsurancePatients from '../inpatient-insurance-patients.tsx';
 
 // import PhysicianEfficiency from '../../../medical-efficiency/doctor-efficiency/physician-efficiency.tsx';
 
-import TotalRevenue from '../total-revenue.tsx';
+import OutpatientTotalRevenue from '../OutpatientTotalRevenue.tsx';
 import RevenueRatio from '../revenue-ratio.tsx';
 import RevenueStructure from '../revenue-structure.tsx';
 import RevenueGrowthRate from '../revenue-growth.tsx';
 import AverageRevenue from '../average-revenue.tsx';
 
-// import TotalInpatientRevenue from '../../../hospital-revenue/inpatient-revenue/inpatient-total-revenue.tsx';
 import InpatientTotalRevenue from '../InpatientTotalRevenue';
 import DoctorWorkloadPerformance from '../doctor-workload-performance';
-import DepartmentWorkloadPerformance from '../department-workload-performance';
+import DepartmentWorkloadPerformance from '../DepartmentWorkloadPerformance';
 import InpatientRevenueRanking from '../inpatient-revenue-ranking.tsx';
-import InpatientRevenueClassification from '../inpatient-revenue-classification.tsx';
+import InpatientRevenueClassification from '../inpatient-revenue-classification';
 
 // import PhysicalExaminationRevenue from '../../../hospital-revenue/physical-exam-revenue/physical-exam-average-revenue.tsx';
 // import PhysicalExaminationAverageRevenue from '../../../hospital-revenue/physical-exam-revenue/physical-exam-average-revenue.tsx';
@@ -631,8 +628,8 @@ const renderContent = () => {
     //   return <DepartmentTransferStatistics />;
     // case 'physical-exam-visits':
     //   return <HealthExamination />;
-    case 'total-revenue':
-      return <TotalRevenue />;
+    case 'outpatient_total-revenue':
+      return <OutpatientTotalRevenue />;
     case 'revenue-ratio':
       return <RevenueRatio />;
     case 'revenue-structure':

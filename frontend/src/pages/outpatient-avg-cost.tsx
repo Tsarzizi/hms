@@ -1,5 +1,4 @@
-// src/yiliaofudan/menjizhencijunfeiyong/frontend/menjizhencijunfeiyong.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -78,10 +77,172 @@ const timeRanges = [
   { key: 'year', label: '年' }
 ];
 
-// API基础URL - 使用端口5047
+// API基础URL
 const API_BASE_URL = 'http://localhost:5047';
 
-// 年份选择器组件
+// 模拟科室数据
+const mockDepartments = [
+  { value: "internal", label: "内科" },
+  { value: "surgery", label: "外科" },
+  { value: "cardiology", label: "心血管内科" },
+  { value: "neurology", label: "神经内科" },
+  { value: "respiratory", label: "呼吸内科" },
+  { value: "gastroenterology", label: "消化内科" }
+];
+
+// 模拟医生数据
+const mockDoctors = [
+  { value: "doctor_1", label: "王医生" },
+  { value: "doctor_2", label: "李医生" },
+  { value: "doctor_3", label: "张医生" },
+  { value: "doctor_4", label: "刘医生" },
+  { value: "doctor_5", label: "陈医生" }
+];
+
+// 多选下拉组件
+function MultiSelect({
+  label,
+  options,
+  selected,
+  onChange,
+  placeholder = "请选择…",
+  searchPlaceholder = "搜索…",
+}: {
+  label: string;
+  options: { value: string; label: string }[];
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+  placeholder?: string;
+  searchPlaceholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+
+  const filtered = useMemo(
+    () =>
+      !q
+        ? options
+        : options.filter(
+            (o) =>
+              o.label.toLowerCase().includes(q.toLowerCase()) ||
+              o.value.toLowerCase().includes(q.toLowerCase())
+          ),
+    [options, q]
+  );
+
+  const allSelected = selected.size > 0 && selected.size === options.length;
+
+  const toggle = (val: string) => {
+    const next = new Set(selected);
+    if (next.has(val)) next.delete(val);
+    else next.add(val);
+    onChange(next);
+  };
+
+  const handleAll = () => {
+    if (allSelected) onChange(new Set());
+    else onChange(new Set(options.map((o) => o.value)));
+  };
+
+  const clear = () => onChange(new Set());
+
+  const summaryText =
+    selected.size === 0
+      ? placeholder
+      : selected.size === 1
+      ? options.find((o) => o.value === Array.from(selected)[0])?.label ?? placeholder
+      : `已选 ${selected.size} 项`;
+
+  return (
+    <div className="w-full text-left relative">
+      <label className="text-sm font-medium text-gray-700 mb-2 block">{label}</label>
+      <button
+        type="button"
+        className="w-full border border-gray-300 rounded-lg px-4 py-2.5 bg-white flex items-center justify-between hover:border-blue-500 transition-colors duration-200 shadow-sm"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className={`truncate ${selected.size ? "text-gray-900" : "text-gray-500"}`}>
+          {summaryText}
+        </span>
+        <span className="text-gray-400 transform transition-transform duration-200">
+          {open ? "▴" : "▾"}
+        </span>
+      </button>
+
+      {open && (
+        <div className="absolute z-20 mt-2 w-full border border-gray-200 rounded-lg bg-white shadow-lg overflow-hidden">
+          <div className="p-3 border-b border-gray-100">
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={searchPlaceholder}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
+            />
+          </div>
+          <div className="max-h-64 overflow-auto">
+            {options.length > 0 && (
+              <label className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 hover:bg-blue-50 cursor-pointer transition-colors duration-150">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={handleAll}
+                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm font-medium text-gray-700">
+                  {allSelected ? "取消全选" : "全选所有结果"}
+                </span>
+              </label>
+            )}
+            {filtered.length === 0 ? (
+              <div className="px-4 py-6 text-gray-400 text-center">无匹配项</div>
+            ) : (
+              filtered.map((o) => (
+                <label
+                  key={o.value}
+                  className="flex items-center gap-3 px-4 py-3 hover:bg-blue-50 cursor-pointer transition-colors duration-150 border-b border-gray-50 last:border-b-0"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(o.value)}
+                    onChange={() => toggle(o.value)}
+                    className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-700 truncate" title={`${o.label}（${o.value}）`}>
+                    {o.label} <span className="text-gray-400">（{o.value}）</span>
+                  </span>
+                </label>
+              ))
+            )}
+          </div>
+          <div className="p-4 border-t border-gray-100 bg-gray-50 flex items-center justify-between">
+            <div className="text-xs text-gray-500">
+              共 {filtered.length} 项，已选 {selected.size} 项
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-white transition-colors duration-150"
+                onClick={clear}
+              >
+                清空
+              </button>
+              <button
+                type="button"
+                className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-150"
+                onClick={() => setOpen(false)}
+              >
+                完成
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 年份选择器组件（样式调整）
 const YearSelector = ({
   selectedYear,
   onYearChange
@@ -124,8 +285,8 @@ const YearSelector = ({
 
   if (loading) {
     return (
-      <div className="flex items-center space-x-2">
-        <span className="text-sm text-gray-600">分析年份：</span>
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-gray-700 block">分析年份</label>
         <div className="text-sm text-gray-500">加载中...</div>
       </div>
     );
@@ -133,20 +294,20 @@ const YearSelector = ({
 
   if (availableYears.length === 0) {
     return (
-      <div className="flex items-center space-x-2">
-        <span className="text-sm text-gray-600">分析年份：</span>
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-gray-700 block">分析年份</label>
         <div className="text-sm text-red-500">无可用数据</div>
       </div>
     );
   }
 
   return (
-    <div className="flex items-center space-x-2">
-      <span className="text-sm text-gray-600">分析年份：</span>
+    <div className="space-y-2">
+      <label className="text-sm font-medium text-gray-700 block">分析年份</label>
       <select
         value={selectedYear}
         onChange={(e) => onYearChange(Number(e.target.value))}
-        className="bg-gray-100 border border-gray-300 rounded-md px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+        className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
       >
         {availableYears.map(year => (
           <option key={year} value={year}>{year}年</option>
@@ -167,6 +328,14 @@ export default function OutpatientAvgCost() {
     indicators.map(ind => ind.key)
   );
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+
+  // 筛选条件状态
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [selectedDeps, setSelectedDeps] = useState<Set<string>>(new Set());
+  const [selectedDoctors, setSelectedDoctors] = useState<Set<string>>(new Set());
 
   // 从后端获取图表数据
   const fetchData = async (range: string, year?: number) => {
@@ -292,9 +461,9 @@ export default function OutpatientAvgCost() {
     const months = ['2024-01', '2024-02', '2024-03', '2024-04', '2024-05', '2024-06'];
 
     months.forEach(month => {
-      const totalAvgCost = Math.floor(Math.random() * 100) + 200; // 200-300元
-      const outpatientAvgCost = Math.floor(Math.random() * 80) + 180; // 180-260元
-      const emergencyAvgCost = Math.floor(Math.random() * 150) + 250; // 250-400元
+      const totalAvgCost = Math.floor(Math.random() * 100) + 200;
+      const outpatientAvgCost = Math.floor(Math.random() * 80) + 180;
+      const emergencyAvgCost = Math.floor(Math.random() * 150) + 250;
 
       mockData.push({
         date: month,
@@ -444,106 +613,307 @@ export default function OutpatientAvgCost() {
     return `${numberValue.toFixed(2)}${unit}`;
   };
 
+  const getComparisonIcon = (changeType: string) => {
+    switch (changeType) {
+      case 'increase':
+        return '↑';
+      case 'decrease':
+        return '↓';
+      default:
+        return '→';
+    }
+  };
+
+  const getComparisonColor = (changeType: string) => {
+    switch (changeType) {
+      case 'increase':
+        return 'text-green-600 bg-green-100';
+      case 'decrease':
+        return 'text-red-600 bg-red-100';
+      default:
+        return 'text-gray-600 bg-gray-100';
+    }
+  };
+
+  const handleQuery = async () => {
+    setLoading(true);
+    try {
+      await fetchData(timeRange, selectedYear);
+      await fetchSummaryData(timeRange);
+      await fetchComparisonData('yoy', setYoyData);
+      await fetchComparisonData('mom', setMomData);
+    } catch (error) {
+      console.error('查询数据失败:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReset = () => {
+    setSelectedDate(() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    });
+    setSelectedDeps(new Set());
+    setSelectedDoctors(new Set());
+    setTimeRange('month');
+    setSelectedYear(new Date().getFullYear());
+
+    fetchData('month', new Date().getFullYear());
+  };
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="min-h-screen bg-gray-50 p-6 space-y-6">
       {/* 页面标题 */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <h2 className="text-xl font-bold text-gray-800 mb-2">门急诊次均费用</h2>
-        <p className="text-gray-600 text-sm">
-          监控和分析医院门急诊次均费用情况，包括门急诊总体次均费用、门诊患者次均费用、急诊患者次均费用等关键指标，支持同比环比分析
-        </p>
-      </div>
-
-      {/* 主要指标卡片 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {indicators.map((indicator) => (
-          <div key={indicator.key} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-medium text-gray-700">{indicator.name}</h3>
-              <div
-                className="w-4 h-4 rounded-full"
-                style={{ backgroundColor: indicator.color }}
-              ></div>
-            </div>
-            <div className="text-3xl font-bold text-gray-900 mb-3">
-              {getSummaryValue(indicator.key as keyof OutpatientCostData)}
-            </div>
-            <div className="bg-gray-50 rounded-lg p-4">
-              <p className="text-sm text-gray-600 font-medium mb-2">统计说明：</p>
-              <p className="text-xs text-gray-500 leading-relaxed">
-                {indicator.description}
-              </p>
-              {indicator.key === 'totalAvgCost' && (
-                <p className="text-xs text-gray-500 mt-2">
-                  <strong>计算公式：</strong>门急诊次均费用（元）= 期内(医疗收入中的门急诊收入-健康检查收入) / 同期门急诊总诊疗人次数
-                </p>
-              )}
-              {indicator.key === 'outpatientAvgCost' && (
-                <p className="text-xs text-gray-500 mt-2">
-                  <strong>计算公式：</strong>门诊次均费用（元）= 期内(医疗收入中的门诊收入-健康检查收入) / 同期门诊诊疗人次数
-                </p>
-              )}
-              {indicator.key === 'emergencyAvgCost' && (
-                <p className="text-xs text-gray-500 mt-2">
-                  <strong>计算公式：</strong>急诊次均费用（元）= 期内医疗收入中的急诊收入 / 同期急诊诊疗人次数
-                </p>
-              )}
-            </div>
+      <header className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center justify-between">
+          <div className="text-left">
+            <h1 className="text-2xl font-bold text-gray-900">门急诊次均费用分析</h1>
+            <p className="text-gray-600 text-sm mt-2">
+              监控和分析医院门急诊次均费用情况，包括门急诊总体次均费用、门诊患者次均费用、急诊患者次均费用等关键指标，支持同比环比分析
+            </p>
           </div>
-        ))}
-      </div>
-
-      {/* 图表控制区域 */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4 lg:mb-0">趋势分析图表</h3>
-
-          <div className="flex flex-col lg:flex-row lg:items-center space-y-4 lg:space-y-0 lg:space-x-4">
-            <div className="flex items-center space-x-2">
-              <span className="text-sm text-gray-600">时间维度：</span>
-              <div className="flex bg-gray-100 rounded-lg p-1">
-                {timeRanges.map((range) => (
-                  <button
-                    key={range.key}
-                    onClick={() => setTimeRange(range.key)}
-                    className={`px-3 py-1 text-sm rounded-md transition-colors whitespace-nowrap ${
-                      timeRange === range.key
-                        ? 'bg-green-600 text-white'
-                        : 'text-gray-600 hover:text-gray-800'
-                    }`}
-                  >
-                    {range.label}
-                  </button>
-                ))}
-              </div>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <div className="text-sm font-medium text-gray-900">{selectedDate} 数据</div>
+              <div className="text-xs text-gray-500">最后更新：今天 14:30</div>
             </div>
+            <button className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors duration-200">
+              <span className="text-lg">💰</span>
+            </button>
+          </div>
+        </div>
+      </header>
 
+      {/* 筛选区域 */}
+      <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4 text-left">数据筛选</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700 block">统计月份</label>
+            <input
+              type="month"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <MultiSelect
+              label="科室筛选"
+              options={mockDepartments}
+              selected={selectedDeps}
+              onChange={setSelectedDeps}
+              placeholder="全部科室"
+              searchPlaceholder="搜索科室…"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <MultiSelect
+              label="医生筛选"
+              options={mockDoctors}
+              selected={selectedDoctors}
+              onChange={setSelectedDoctors}
+              placeholder="全部医生"
+              searchPlaceholder="搜索医生…"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700 block">时间维度</label>
+            <select
+              value={timeRange}
+              onChange={(e) => setTimeRange(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
+            >
+              {timeRanges.map((range) => (
+                <option key={range.key} value={range.key}>
+                  {range.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-2">
             <YearSelector
               selectedYear={selectedYear}
               onYearChange={setSelectedYear}
             />
           </div>
+
+          <div className="flex items-end gap-2 col-span-2">
+            <button
+              onClick={handleQuery}
+              disabled={loading}
+              className="flex-1 px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 font-medium flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  查询中...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  查询
+                </>
+              )}
+            </button>
+            <button
+              onClick={handleReset}
+              className="flex-1 px-6 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors duration-200 font-medium flex items-center justify-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              重置
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* 指标卡片 */}
+      <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {indicators.map((indicator) => (
+          <div key={indicator.key} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">{indicator.name}</h3>
+              <div
+                className="w-3 h-3 rounded-full"
+                style={{ backgroundColor: indicator.color }}
+              ></div>
+            </div>
+            <div className="space-y-3">
+              <div className="text-3xl font-bold text-gray-900">
+                {getSummaryValue(indicator.key as keyof OutpatientCostData)}
+              </div>
+              <div className="text-sm">
+                {summaryData ? (
+                  <span className="text-gray-400 text-sm">当前平均值</span>
+                ) : (
+                  <span className="text-gray-400 text-sm">等待数据库连接</span>
+                )}
+              </div>
+              <div className="bg-gray-50 rounded-lg p-4">
+                <p className="text-sm text-gray-600 font-medium mb-2">计算公式：</p>
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  {indicator.description}
+                </p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </section>
+
+      {/* 同比环比分析 */}
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">同比分析</h2>
+          <p className="text-sm text-gray-500 mb-4">与去年同期相比的增减情况</p>
+          <div className="space-y-4">
+            {indicators.map((indicator) => {
+              const comparison = yoyData[indicator.key];
+              return (
+                <div key={`yoy-${indicator.key}`} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-b-0">
+                  <div className="flex items-center">
+                    <div
+                      className="w-3 h-3 rounded-full mr-3"
+                      style={{ backgroundColor: indicator.color }}
+                    ></div>
+                    <span className="text-sm font-medium text-gray-700">{indicator.name}</span>
+                  </div>
+                  <div className="text-right">
+                    {comparison ? (
+                      <>
+                        <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getComparisonColor(comparison.change_type)}`}>
+                          <span className="mr-1">{getComparisonIcon(comparison.change_type)}</span>
+                          {Math.abs(comparison.change_rate).toFixed(1)}%
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {formatValue(comparison.current_value, indicator.unit)} vs {formatValue(comparison.comparison_value, indicator.unit)}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-sm text-gray-500">暂无数据</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
-        {/* 指标选择器 */}
-        <div className="mb-6">
-          <div className="flex items-center mb-3">
-            <span className="text-sm text-gray-600 mr-3">显示指标：</span>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">环比分析</h2>
+          <p className="text-sm text-gray-500 mb-4">与上期相比的增减情况</p>
+          <div className="space-y-4">
+            {indicators.map((indicator) => {
+              const comparison = momData[indicator.key];
+              return (
+                <div key={`mom-${indicator.key}`} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-b-0">
+                  <div className="flex items-center">
+                    <div
+                      className="w-3 h-3 rounded-full mr-3"
+                      style={{ backgroundColor: indicator.color }}
+                    ></div>
+                    <span className="text-sm font-medium text-gray-700">{indicator.name}</span>
+                  </div>
+                  <div className="text-right">
+                    {comparison ? (
+                      <>
+                        <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getComparisonColor(comparison.change_type)}`}>
+                          <span className="mr-1">{getComparisonIcon(comparison.change_type)}</span>
+                          {Math.abs(comparison.change_rate).toFixed(1)}%
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {formatValue(comparison.current_value, indicator.unit)} vs {formatValue(comparison.comparison_value, indicator.unit)}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-sm text-gray-500">暂无数据</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* 图表控制区域 */}
+      <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4 lg:mb-0">趋势分析图表</h2>
+
+          {/* 指标选择器 */}
+          <div className="flex items-center gap-4">
+            <span className="text-sm font-medium text-gray-700">显示指标：</span>
             <button
               onClick={() => setSelectedIndicators(
                 selectedIndicators.length === indicators.length ? [] : indicators.map(ind => ind.key)
               )}
-              className="text-xs text-green-600 hover:text-green-800"
+              className="text-sm text-blue-600 hover:text-blue-800 font-medium"
             >
               {selectedIndicators.length === indicators.length ? '取消全选' : '全选'}
             </button>
           </div>
+        </div>
+
+        {/* 指标选择器 */}
+        <div className="mb-6">
           <div className="flex flex-wrap gap-2">
             {indicators.map((indicator) => (
               <button
                 key={indicator.key}
                 onClick={() => toggleIndicator(indicator.key)}
-                className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                className={`inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                   selectedIndicators.includes(indicator.key)
                     ? 'text-white'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -554,7 +924,7 @@ export default function OutpatientAvgCost() {
               >
                 <div
                   className="w-2 h-2 rounded-full mr-2"
-                  style={{ backgroundColor: indicator.color }}
+                  style={{ backgroundColor: selectedIndicators.includes(indicator.key) ? 'white' : indicator.color }}
                 ></div>
                 {indicator.name}
               </button>
@@ -563,126 +933,88 @@ export default function OutpatientAvgCost() {
         </div>
 
         {/* 图表区域 */}
-        <div className="h-96">
+        <div className="h-[500px] flex items-center justify-center">
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
                 <p className="text-gray-500">加载数据中...</p>
               </div>
             </div>
-          ) : chartData && chartData.length > 0 ? (
-            <Line data={getChartData()} options={getChartOptions()} />
+          ) : chartData.length > 0 ? (
+            <div className="w-full h-full flex items-center justify-center">
+              <div className="w-full max-w-4xl h-full">
+                <Line data={getChartData()} options={getChartOptions()} />
+              </div>
+            </div>
           ) : (
-            <div className="flex items-center justify-center h-full">
+            <div className="flex items-center justify-center h-full bg-gray-50 rounded-lg w-full">
               <div className="text-center">
                 <div className="text-6xl text-gray-300 mb-4">📊</div>
-                <p className="text-gray-500 mb-2">暂无图表数据</p>
-                <p className="text-sm text-gray-400">
+                <p className="text-gray-500 mb-2 text-lg">暂无图表数据</p>
+                <p className="text-gray-400">
                   请确保后端数据源已正确配置并连接
                 </p>
               </div>
             </div>
           )}
         </div>
-      </div>
+      </section>
 
-      {/* 同比环比分析 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">同比分析</h3>
-          <p className="text-xs text-gray-500 mb-4">与去年同期相比的增减情况</p>
-          <div className="space-y-3">
-            {indicators.map((indicator) => {
-              const data = yoyData[indicator.key];
-              return (
-                <div key={`yoy-${indicator.key}`} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-b-0">
-                  <div className="flex items-center">
-                    <div
-                      className="w-3 h-3 rounded-full mr-3"
-                      style={{ backgroundColor: indicator.color }}
-                    ></div>
-                    <span className="text-sm text-gray-700">{indicator.name}</span>
-                  </div>
-                  <div className="text-right">
-                    {data ? (
-                      <>
-                        <div className={`text-sm font-medium ${
-                          data.change_type === 'increase' ? 'text-green-600' : 
-                          data.change_type === 'decrease' ? 'text-red-600' : 
-                          'text-gray-600'
-                        }`}>
-                          {data.change_rate > 0 ? '+' : ''}{data.change_rate.toFixed(2)}%
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          当前: {formatValue(data.current_value, indicator.unit)} |
-                          同期: {formatValue(data.comparison_value, indicator.unit)}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="text-sm text-gray-500">暂无数据</div>
-                        <div className="text-xs text-gray-400">同比增减率</div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+      {/* 详细数据表格 */}
+      <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">详细数据统计</h2>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  时间
+                </th>
+                {indicators.map((indicator) => (
+                  <th key={indicator.key} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {indicator.name}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {chartData.length > 0 ? (
+                chartData.map((item, index) => (
+                  <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {item.date}
+                    </td>
+                    {indicators.map((indicator) => (
+                      <td key={indicator.key} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {formatValue(item.data[indicator.key as keyof OutpatientCostData], indicator.unit)}
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={indicators.length + 1} className="px-6 py-12 text-center text-gray-500">
+                    <div className="text-4xl mb-2">🗃️</div>
+                    <p className="text-lg mb-1">暂无详细数据</p>
+                    <p className="text-sm text-gray-400">
+                      请连接PostgreSQL数据库后查看详细统计
+                    </p>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
-
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">环比分析</h3>
-          <p className="text-xs text-gray-500 mb-4">与上期相比的增减情况</p>
-          <div className="space-y-3">
-            {indicators.map((indicator) => {
-              const data = momData[indicator.key];
-              return (
-                <div key={`mom-${indicator.key}`} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-b-0">
-                  <div className="flex items-center">
-                    <div
-                      className="w-3 h-3 rounded-full mr-3"
-                      style={{ backgroundColor: indicator.color }}
-                    ></div>
-                    <span className="text-sm text-gray-700">{indicator.name}</span>
-                  </div>
-                  <div className="text-right">
-                    {data ? (
-                      <>
-                        <div className={`text-sm font-medium ${
-                          data.change_type === 'increase' ? 'text-green-600' : 
-                          data.change_type === 'decrease' ? 'text-red-600' : 
-                          'text-gray-600'
-                        }`}>
-                          {data.change_rate > 0 ? '+' : ''}{data.change_rate.toFixed(2)}%
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          当前: {formatValue(data.current_value, indicator.unit)} |
-                          上期: {formatValue(data.comparison_value, indicator.unit)}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="text-sm text-gray-500">暂无数据</div>
-                        <div className="text-xs text-gray-400">环比增减率</div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
+      </section>
 
       {/* 数据说明 */}
-      <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+      <section className="bg-blue-50 border border-blue-200 rounded-xl p-6">
         <div className="flex items-start">
-          <div className="text-green-600 mr-2 mt-0.5">ℹ️</div>
-          <div className="text-green-800 text-sm">
-            <p className="font-medium mb-1">数据说明：</p>
-            <ul className="list-disc list-inside space-y-1 text-xs">
+          <div className="text-blue-600 mr-3 mt-0.5 text-lg">💡</div>
+          <div className="text-blue-800">
+            <h3 className="font-medium mb-2 text-lg">数据说明：</h3>
+            <ul className="list-disc list-inside space-y-2 text-sm">
               <li>数据来源于医院财务系统和门急诊管理系统，每月更新</li>
               <li><strong>门急诊次均费用</strong> = 期内(医疗收入中的门急诊收入-健康检查收入)/同期门急诊总诊疗人次数</li>
               <li><strong>门诊患者次均费用</strong> = 期内(医疗收入中的门诊收入-健康检查收入)/同期门诊诊疗人次数</li>
@@ -690,11 +1022,12 @@ export default function OutpatientAvgCost() {
               <li>次均费用是衡量医疗费用控制水平的重要指标，反映医院费用管理成效</li>
               <li>支持按月、季度、年查看不同时间粒度的数据趋势</li>
               <li>点击指标标签可控制图表中对应数据线的显示/隐藏</li>
+              <li>费用分析有助于了解医院费用结构和控制医疗成本</li>
               <li>后端服务运行在: {API_BASE_URL}</li>
             </ul>
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

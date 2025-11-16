@@ -5,7 +5,7 @@ from flask import Blueprint, request, jsonify, send_file
 from openpyxl import Workbook
 from psycopg2.extras import RealDictCursor
 
-from .utils.db import get_conn, put_conn  # ✅ 使用你现有的连接池
+from backend.app.shared.db import get_conn, put_conn  # ✅ 使用你现有的连接池
 
 bp = Blueprint(
     "department_workload_performance",
