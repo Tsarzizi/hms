@@ -1,0 +1,238 @@
+SQL1
+
+```sql
+`-- 定义参数，方便调整时间范围`
+`WITH params AS (`
+  `SELECT` 
+    `(CURRENT_DATE - INTERVAL '12 day')::date AS start_date,  -- 起始日期：13天前`
+    `(CURRENT_DATE + INTERVAL '1 day')::date   AS end_date    -- 结束日期：明天（不含）`
+`),`
+
+`dep_incom AS (`
+  `-- 第一部分：从 t_workload_inp_f 汇总每日的费用和数量`
+  `SELECT`
+      `i.rcpt_date::date                AS rcpt_date,      -- 收费日期`
+      `i.patient_in_dept                AS dep_code,       -- 科室编码`
+      `d."绩效科室名称"                  AS dep_name,       -- 科室名称`
+      `i.item_name,                                     
+      i.item_code,`
+      `i.item_class_name,`
+      `SUM(i.charges)                   AS charges,        -- 总费用`
+      `SUM(i.amount)                    AS amount          -- 总数量`
+  `FROM t_workload_inp_f AS i`
+  `LEFT JOIN t_workload_dep_def2his AS d`
+         `ON d."HIS科室编码" = i.patient_in_dept`
+  `JOIN params p ON TRUE`
+  `WHERE i.rcpt_date >= p.start_date`
+    `AND i.rcpt_date <  p.end_date`
+  `GROUP BY`
+      `i.rcpt_date,`
+      `i.patient_in_dept,`
+      `d."绩效科室名称",`
+      `i.item_name,`
+      `i.item_code,`
+      `i.item_class_name`
+
+  `UNION ALL`
+
+  `-- 第二部分：从历史表 t_dep_income_inp 中取相同时间段的数据`
+  `SELECT`
+      `x.rcpt_date::date        AS rcpt_date,`
+      `x.dep_code,`
+      `x.dep_name,`
+      `x.item_name,`
+      `x.item_code,`
+      `x.item_class_name,`
+      `x.charges,`
+      `x.amount`
+  `FROM t_dep_income_inp AS x`
+  `JOIN params p ON TRUE`
+  `WHERE x.rcpt_date >= p.start_date`
+    `AND x.rcpt_date <  p.end_date`
+`)`
+
+`-- 最终结果输出`
+`SELECT`
+  `rcpt_date,`
+  `dep_code,`
+  `dep_name,`
+  `item_name,`
+  `item_code,`
+  `item_class_name,`
+  `charges,`
+  `amount`
+`FROM dep_incom`
+`ORDER BY rcpt_date, dep_code, item_code;`
+```
+
+
+
+
+SQL2
+
+```sql
+`-- 定义时间参数，便于维护和复用`
+`WITH params AS (`
+  `SELECT` 
+    `CURRENT_DATE AS today,`
+    `(CURRENT_DATE + INTERVAL '1 day')::date AS tomorrow`
+`),`
+
+`inbed_data AS (`
+  `-- ✅ 当天数据：从实时登记表汇总`
+  `SELECT` 
+      `i.adm_date::date AS inbed_date,       -- 入院日期`
+      `i.adm_dept_code AS dep_code,          -- 科室编码`
+      `i.adm_dept_name AS dep_name,          -- 科室名称`
+      `COUNT(i.mdtrt_id) AS amount           -- 在院人数`
+  `FROM t_workload_inbed_reg_f AS i`
+  `JOIN params p ON TRUE`
+  `WHERE i.adm_date >= p.today` 
+    `AND i.adm_date <  p.tomorrow`
+  `GROUP BY i.adm_date, i.adm_dept_code, i.adm_dept_name`
+
+  `UNION ALL`
+
+  `-- ✅ 历史汇总数据`
+  `SELECT` 
+      `h.inbed_date,`
+      `h.dep_code,`
+      `h.dep_name,`
+      `h.amount`
+  `FROM t_dep_count_inbed AS h`
+  `JOIN params p ON TRUE`
+  `WHERE h.inbed_date < p.today`
+`)`
+
+`-- ✅ 输出合并结果`
+`SELECT` 
+    `inbed_date,`
+    `dep_code,`
+    `dep_name,`
+    `amount`
+`FROM inbed_data`
+`ORDER BY inbed_date DESC, amount DESC;`
+```
+
+
+
+SQL3
+
+```sql
+
+`SELECT yyyy_mm,`
+    `"绩效科室ID",`
+    `"绩效科室名称",`
+    `"绩效科室类别",`
+    `"绩效科室类型",`
+    `"同类序号",`
+    `COALESCE("人数", 0) AS "人数",`
+    `COALESCE("结算收入", 0) AS "结算收入",`
+    `COALESCE("科室直接成本", 0) AS "科室直接成本",`
+    `COALESCE("绩效总额", 0) AS "绩效总额",`
+    `COALESCE("绩效总额", 0) / NULLIF(COALESCE("人数", 0), 0) AS "人均绩效",`
+    `COALESCE("住院工作量点数", 0) AS "住院工作量点数",`
+    `COALESCE("工作量单价", 0) AS "工作量单价",`
+    `COALESCE("工作量系数", 0) AS "工作量系数",`
+    `COALESCE("住院工作量绩效非手术介入", 0) AS "住院工作量绩效非手术介入",`
+    `COALESCE("基础手术绩效", 0) AS "基础手术绩效",`
+    `COALESCE("介入绩效", 0) AS "介入绩效",`
+    `COALESCE("造影绩效", 0) AS "造影绩效",`
+    `COALESCE("结算收入", 0) AS "结算费用",`
+    `COALESCE("病种成本", 0) AS "DRG病种成本",`
+    `COALESCE("DRG结余", 0) AS "DRG结余",`
+    `COALESCE("drg系数", 0) AS "drg系数",`
+    `COALESCE("DRG绩效", 0) AS "DRG绩效",`
+    `COALESCE("门诊工作量点数", 0) AS "门诊工作量点数",`
+    `COALESCE("门诊工作量绩效非手术介入", 0) AS "门诊工作量绩效非手术介入",`
+    `COALESCE("门诊基础手术绩效", 0) AS "门诊基础手术绩效",`
+    `COALESCE("门诊介入绩效", 0) AS "门诊介入绩效",`
+    `COALESCE("门诊造影绩效", 0) AS "门诊造影绩效",`
+    `COALESCE("挂号费奖励", 0) AS "挂号费奖励",`
+    `COALESCE("诊察费奖励", 0) AS "诊察费奖励",`
+    `COALESCE("三级手术奖励", 0) AS "三级手术奖励",`
+    `COALESCE("四级手术奖励", 0) AS "四级手术奖励",`
+    `COALESCE("单项奖励合计", 0) AS "单项奖励合计"`
+   `FROM m_v_workload_doc_perform_total`
+`union` 
+`SELECT yyyy_mm,`
+    `"绩效科室ID",`
+    `"绩效科室名称",`
+    `"绩效科室类别",`
+    `"绩效科室类型",`
+    `"同类序号",`
+    `COALESCE("人数", 0) AS "人数",`
+    `COALESCE("结算收入", 0) AS "结算收入",`
+    `COALESCE("科室直接成本", 0) AS "科室直接成本",`
+    `COALESCE("绩效总额", 0) AS "绩效总额",`
+    `COALESCE("绩效总额", 0) / NULLIF(COALESCE("人数", 0), 0) AS "人均绩效",`
+    `COALESCE("住院工作量点数", 0) AS "住院工作量点数",`
+    `COALESCE("工作量单价", 0) AS "工作量单价",`
+    `COALESCE("工作量系数", 0) AS "工作量系数",`
+    `COALESCE("住院工作量绩效非手术介入", 0) AS "住院工作量绩效非手术介入",`
+    `COALESCE("基础手术绩效", 0) AS "基础手术绩效",`
+    `COALESCE("介入绩效", 0) AS "介入绩效",`
+    `COALESCE("造影绩效", 0) AS "造影绩效",`
+    `COALESCE("结算收入", 0) AS "结算费用",`
+    `COALESCE("病种成本", 0) AS "DRG病种成本",`
+    `COALESCE("DRG结余", 0) AS "DRG结余",`
+    `COALESCE("drg系数", 0) AS "drg系数",`
+    `COALESCE("DRG绩效", 0) AS "DRG绩效",`
+    `COALESCE("门诊工作量点数", 0) AS "门诊工作量点数",`
+    `COALESCE("门诊工作量绩效非手术介入", 0) AS "门诊工作量绩效非手术介入",`
+    `COALESCE("门诊基础手术绩效", 0) AS "门诊基础手术绩效",`
+    `COALESCE("门诊介入绩效", 0) AS "门诊介入绩效",`
+    `COALESCE("门诊造影绩效", 0) AS "门诊造影绩效",`
+    `COALESCE("挂号费奖励", 0) AS "挂号费奖励",`
+    `COALESCE("诊察费奖励", 0) AS "诊察费奖励",`
+    `COALESCE("三级手术奖励", 0) AS "三级手术奖励",`
+    `COALESCE("四级手术奖励", 0) AS "四级手术奖励",`
+    `COALESCE("单项奖励合计", 0) AS "单项奖励合计"`
+    `from m_v_workload_dep_perform_total`
+`WHERE` 
+   `yyyy_mm = :yyyy_mm` 
+`ORDER BY  yyyy_mm,"绩效科室类别","同类序号"`
+```
+
+
+
+SQL4
+
+```SQL
+SELECT t_workload_inp_f.rcpt_date,
+    t_workload_inp_f.patient_in_dept AS dep_code,
+    t_workload_dep_def2his."绩效科室名称" AS dep_name,
+    t_workload_inp_f.item_name,
+    t_workload_inp_f.item_code,
+    t_workload_inp_f.item_class_name,
+    sum(t_workload_inp_f.charges) AS charges,
+    sum(t_workload_inp_f.amount) AS amount
+   FROM (t_workload_inp_f
+     LEFT JOIN t_workload_dep_def2his ON (((t_workload_dep_def2his."HIS科室编码")::text = (t_workload_inp_f.patient_in_dept)::text)))
+  WHERE (t_workload_inp_f.rcpt_date < CURRENT_DATE)
+  GROUP BY t_workload_inp_f.rcpt_date, t_workload_inp_f.patient_in_dept, t_workload_dep_def2his."绩效科室名称", t_workload_inp_f.item_name, t_workload_inp_f.item_code, t_workload_inp_f.item_class_name
+
+
+```
+
+
+
+SQL5
+
+```SQL
+
+
+SELECT t_workload_inp_f.billing_date_time AS billing_date,
+    t_workload_inp_f.order_doctor AS doc_code,
+    t_workload_doc_2dep_def."姓名" AS doc_name,
+    t_workload_inp_f.item_name,
+    t_workload_inp_f.item_code,
+    t_workload_inp_f.item_class_name,
+    sum(t_workload_inp_f.costs) AS costs,
+    sum(t_workload_inp_f.amount) AS amount
+   FROM (t_workload_inp_f
+     LEFT JOIN t_workload_doc_2dep_def ON (((t_workload_doc_2dep_def."工号")::text = (t_workload_inp_f.order_doctor)::text)))
+  WHERE (t_workload_inp_f.rcpt_date < CURRENT_DATE)
+  GROUP BY t_workload_inp_f.billing_date_time, t_workload_inp_f.order_doctor, t_workload_doc_2dep_def."姓名", t_workload_inp_f.item_name, t_workload_inp_f.item_code, t_workload_inp_f.item_class_name
+```
+

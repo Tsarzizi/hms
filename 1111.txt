@@ -1,0 +1,28 @@
+SELECT t_workload_inp_f.rcpt_date,
+    t_workload_inp_f.patient_in_dept AS dep_code,
+    t_workload_dep_def2his."绩效科室名称" AS dep_name,
+    t_workload_inp_f.item_name,
+    t_workload_inp_f.item_code,
+    t_workload_inp_f.item_class_name,
+    sum(t_workload_inp_f.charges) AS charges,
+    sum(t_workload_inp_f.amount) AS amount
+   FROM (t_workload_inp_f
+     LEFT JOIN t_workload_dep_def2his ON (((t_workload_dep_def2his."HIS科室编码")::text = (t_workload_inp_f.patient_in_dept)::text)))
+  WHERE (t_workload_inp_f.rcpt_date < CURRENT_DATE)
+  GROUP BY t_workload_inp_f.rcpt_date, t_workload_inp_f.patient_in_dept, t_workload_dep_def2his."绩效科室名称", t_workload_inp_f.item_name, t_workload_inp_f.item_code, t_workload_inp_f.item_class_name
+
+
+
+SELECT t_workload_inp_f.billing_date_time AS billing_date,
+    t_workload_inp_f.order_doctor AS doc_code,
+    t_workload_doc_2dep_def."姓名" AS doc_name,
+    t_workload_inp_f.item_name,
+    t_workload_inp_f.item_code,
+    t_workload_inp_f.item_class_name,
+    sum(t_workload_inp_f.costs) AS costs,
+    sum(t_workload_inp_f.amount) AS amount
+   FROM (t_workload_inp_f
+     LEFT JOIN t_workload_doc_2dep_def ON (((t_workload_doc_2dep_def."工号")::text = (t_workload_inp_f.order_doctor)::text)))
+  WHERE (t_workload_inp_f.rcpt_date < CURRENT_DATE)
+  GROUP BY t_workload_inp_f.billing_date_time, t_workload_inp_f.order_doctor, t_workload_doc_2dep_def."姓名", t_workload_inp_f.item_name, t_workload_inp_f.item_code, t_workload_inp_f.item_class_name
+
