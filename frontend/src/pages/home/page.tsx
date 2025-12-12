@@ -1,10 +1,32 @@
-
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 function HomePage() {
   const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // 从 localStorage 获取登录时保存的userCode作为用户名
+  const [username, setUsername] = useState<string | null>(null);
+
+  useEffect(() => {
+    // 检查是否有userCode（登录时使用的字段）
+    const storedUserCode = localStorage.getItem('userCode');
+    const token = localStorage.getItem('token');
+    console.log('Token检查:', { token: token ? '存在' : '缺失', userCode: storedUserCode ? '存在' : '缺失' });
+    // 如果有userCode，使用它作为用户名
+    if (storedUserCode) {
+      setUsername(storedUserCode);
+    } else if (localStorage.getItem('username')) {
+      // 如果没有userCode但有username，使用username
+      setUsername(localStorage.getItem('username'));
+    } else {
+      // 如果都没有，重定向到登录页
+      navigate('/login', { replace: true });
+      return;
+    }
+  }, [navigate]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -13,6 +35,46 @@ function HomePage() {
 
     return () => clearInterval(timer);
   }, []);
+
+  // 点击外部关闭下拉菜单
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  const handleLogout = () => {
+    // 清除本地存储的用户信息
+    localStorage.removeItem('userCode');
+    localStorage.removeItem('username');
+    localStorage.removeItem('token');
+    // 重定向到登录页面
+    navigate('/login');
+  };
+
+  const handlePasswordChange = () => {
+    // 导航到修改密码页面
+    navigate('/change-password');
+  };
+
+  // 如果还在加载或未获取到用户名，可显示加载状态或直接由上层逻辑处理跳转
+  if (username === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+          <p className="text-gray-600">正在验证登录状态...</p>
+        </div>
+      </div>
+    );
+  }
 
   const mainModules = [
     {
@@ -107,7 +169,7 @@ function HomePage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Hero Section */}
-      <div 
+      <div
         className="relative bg-gradient-to-r from-blue-600 to-blue-800 text-white"
         style={{
           backgroundImage: `url('https://readdy.ai/api/search-image?query=Modern%20hospital%20interior%20with%20clean%20white%20corridors%2C%20medical%20equipment%2C%20professional%20healthcare%20environment%2C%20bright%20lighting%2C%20contemporary%20medical%20facility%20design%2C%20sterile%20and%20organized%20atmosphere&width=1920&height=600&seq=hospital-hero-bg&orientation=landscape')`,
@@ -138,9 +200,9 @@ function HomePage() {
               </div>
               <div className="flex items-center">
                 <i className="ri-calendar-line mr-2"></i>
-                <span>{currentTime.toLocaleDateString('zh-CN', { 
-                  year: 'numeric', 
-                  month: 'long', 
+                <span>{currentTime.toLocaleDateString('zh-CN', {
+                  year: 'numeric',
+                  month: 'long',
                   day: 'numeric',
                   weekday: 'long'
                 })}</span>
@@ -155,13 +217,39 @@ function HomePage() {
         <div className="mb-12">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold text-gray-800">核心功能模块</h2>
-            <button 
-              onClick={() => navigate('/dashboard')}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-7transition-colors whitespace-nowrap"
-            >
-              <i className="ri-dashboard-line mr-2"></i>
-              进入仪表板
-            </button>
+
+            {/* 用户操作菜单 - 使用登录时的真实用户名 */}
+            <div className="relative" ref={dropdownRef}>
+              <button
+                onClick={() => setShowDropdown(!showDropdown)}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap"
+              >
+                <i className="ri-user-line mr-2"></i>
+                <span>{username}</span>
+                <i className={`ri-arrow-down-s-line ml-2 transition-transform ${showDropdown ? 'rotate-180' : ''}`}></i>
+              </button>
+
+              {showDropdown && (
+                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+                  <div className="py-1">
+                    <button
+                      onClick={handlePasswordChange}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                    >
+                      <i className="ri-lock-line mr-2"></i>
+                      修改密码
+                    </button>
+                    <button
+                      onClick={handleLogout}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                    >
+                      <i className="ri-logout-box-line mr-2"></i>
+                      退出登录
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {mainModules.map((item, index) => (

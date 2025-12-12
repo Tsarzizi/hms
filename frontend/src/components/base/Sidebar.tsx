@@ -24,6 +24,11 @@ export default function Sidebar({ menuItems, onMenuClick, activeMenu }: SidebarP
     );
   };
 
+  // 处理返回首页的点击事件
+  const handleHomeClick = () => {
+    window.location.href = '/home';
+  };
+
   const renderMenuItem = (item: MenuItem, level = 0) => {
     const hasChildren = item.children && item.children.length > 0;
     const isExpanded = expandedMenus.includes(item.id);
@@ -63,7 +68,7 @@ export default function Sidebar({ menuItems, onMenuClick, activeMenu }: SidebarP
             <i className={`ri-arrow-${isExpanded ? 'up' : 'down'}-s-line text-gray-400`}></i>
           )}
         </div>
-        
+
         {hasChildren && isExpanded && (
           <div className={level === 0 ? 'bg-gray-50' : 'bg-gray-100'}>
             {item.children?.map(child => renderMenuItem(child, level + 1))}
@@ -75,7 +80,10 @@ export default function Sidebar({ menuItems, onMenuClick, activeMenu }: SidebarP
 
   return (
     <div className="w-64 bg-white shadow-lg h-screen overflow-y-auto">
-      <div className="p-6 border-b border-gray-200">
+      <div
+        className="p-6 border-b border-gray-200 cursor-pointer hover:bg-gray-50 transition-colors duration-200"
+        onClick={handleHomeClick}
+      >
         <div className="flex items-center">
           <div className="w-10 h-10 flex items-center justify-center bg-blue-600 rounded-lg mr-3">
             <i className="ri-hospital-line text-white text-xl"></i>

@@ -9,6 +9,7 @@ import InpatientTotalRevenuePage from '../features/hospital-revenue/inpatientTot
 import OutpatientTotalRevenuePage from "../pages/outpatientTotalRevenue.tsx";
 import DepartmentWorkloadPerformance from "../pages/DepartmentWorkloadPerformance";
 import LoginPage from "../pages/Login"; // 假设你的登录页面组件路径
+import ChangePasswordPage from "../pages/ChangePassword";
 
 const routes: RouteObject[] = [
   {
@@ -26,6 +27,10 @@ const routes: RouteObject[] = [
   {
     path: "/dashboard",
     element: <Dashboard />,
+  },
+  {
+    path: "/change-password",
+    element: <ChangePasswordPage />,
   },
   // {
   //   path: "/outpatient-visits",
